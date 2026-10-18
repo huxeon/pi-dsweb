@@ -99,7 +99,7 @@ test("retry budget is finite and zero disables retries", async () => {
   for (const max of [0, 2]) {
     let calls = 0;
     await assert.rejects(request("search", { query: "hi" }, undefined, {
-      env: { ...env, DEEPSEEK_WEB_MAX_RETRIES: String(max) },
+      env: { ...env, DSWEB_MAX_RETRIES: String(max) },
       fetch: fake(() => { calls++; return json({}, 500); }), sleep: async () => {},
     }), /HTTP 500/);
     assert.equal(calls, max + 1);
@@ -126,7 +126,7 @@ test("ambiguous network errors are not retried or leaked", async () => {
 });
 
 test("validates timeout and retry configuration", async () => {
-  for (const [name, value] of [["DEEPSEEK_WEB_TIMEOUT_MS", "0"], ["DEEPSEEK_WEB_TIMEOUT_MS", "NaN"], ["DEEPSEEK_WEB_MAX_RETRIES", "6"], ["DEEPSEEK_WEB_MAX_RETRIES", "1.5"]]) {
+  for (const [name, value] of [["DSWEB_TIMEOUT_MS", "0"], ["DSWEB_TIMEOUT_MS", "NaN"], ["DSWEB_MAX_RETRIES", "6"], ["DSWEB_MAX_RETRIES", "1.5"]]) {
     await assert.rejects(request("search", { query: "hi" }, undefined, { env: { ...env, [name]: value } }), /integer/);
   }
 });
@@ -149,7 +149,7 @@ test("cancellation interrupts an in-flight request", async () => {
 
 test("total timeout covers in-flight fetch", async () => {
   await assert.rejects(request("search", { query: "hi" }, undefined, {
-    env: { ...env, DEEPSEEK_WEB_TIMEOUT_MS: "5" }, fetch: fake(async (_url, init) => {
+    env: { ...env, DSWEB_TIMEOUT_MS: "5" }, fetch: fake(async (_url, init) => {
       await delay(1000, undefined, { signal: init.signal! }); return json({});
     }),
   }), /timed out after 5 ms/);

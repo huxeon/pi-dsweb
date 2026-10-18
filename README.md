@@ -1,4 +1,4 @@
-# pi-deepseek-web
+# pi-dsweb
 
 为 [Pi](https://pi.dev/) 提供 DeepSeek **网页搜索**与 **Markdown 网页抓取**工具的标准扩展包。不需要 MCP 服务、不需要启动后台进程，也不需要将当前对话模型切换为 DeepSeek。
 
@@ -61,7 +61,7 @@ npm run check
 - “搜索 `DeepSeek site:github.com lang:zh after:2025`，返回 5 条。”
 - “用 DeepSeek 抓取 https://example.com/article 并总结。”
 
-### deepseek_search
+### web_search
 
 请求 `POST https://api.deepseek.com/v1/tools/search`。
 
@@ -79,7 +79,7 @@ npm run check
 
 工具正文展示标题、URL、站点、时间、排名分、权威分、长摘要（缺失时使用短摘要）和可选正文。结构化响应保留官方全部字段，包括 `snippet`、`summary`、`site_icon` 等。没有匹配结果是正常成功，不是错误。
 
-### deepseek_fetch
+### web_fetch
 
 请求 `POST https://api.deepseek.com/v1/tools/fetch`。
 
@@ -110,13 +110,13 @@ npm run check
 
 - 模型和 codemode 只收到有界的 `preview`、`truncated: true` 和 `fullOutputPath`。
 - `response` 被省略，避免通过结构化返回值或 `details` 绕过截断。
-- 完整 API JSON 保存在系统临时目录 `pi-deepseek-web-*/response.json`，可使用 `read` 分段读取。
+- 完整 API JSON 保存在系统临时目录 `pi-dsweb-*/response.json`，可使用 `read` 分段读取。
 - 临时文件不会随会话结束自动删除，以便稍后读取；不再需要时可手动删除。内容可能敏感，请注意临时目录与会话的访问权限。
 
 codemode 示例（需要先启用 Pi 的 codemode 工具）：
 
 ```javascript
-const r = await tools.deepseek_search({
+const r = await tools.web_search({
   query: "DeepSeek site:github.com",
   count: 3,
 });
@@ -136,8 +136,8 @@ if (r.truncated) {
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY` | 无，可选 | 优先使用的 DeepSeek Bearer API Key；未设置时复用 Pi 的 `deepseek` 凭据 |
-| `DEEPSEEK_WEB_TIMEOUT_MS` | `60000` | 单次工具请求总超时，包括重试和退避；范围 1–600000 ms |
-| `DEEPSEEK_WEB_MAX_RETRIES` | `2` | 瞬时 HTTP 错误的额外重试次数；0–5 |
+| `DSWEB_TIMEOUT_MS` | `60000` | 单次工具请求总超时，包括重试和退避；范围 1–600000 ms |
+| `DSWEB_MAX_RETRIES` | `2` | 瞬时 HTTP 错误的额外重试次数；0–5 |
 
 凭据解析顺序：
 
@@ -203,7 +203,7 @@ npm run check
 npm pack --dry-run
 ```
 
-发布时运行 `npm publish`；发布后可使用 `pi install npm:pi-deepseek-web` 安装（需先确认 npm 包名可用；当前目录尚未发布）。
+发布时运行 `npm publish`；发布后可使用 `pi install npm:pi-dsweb` 安装（需先确认 npm 包名可用；当前目录尚未发布）。
 
 ## 官方参考
 

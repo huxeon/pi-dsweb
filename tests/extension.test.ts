@@ -22,11 +22,20 @@ function collectTools() {
 
 test("factory only registers two namespaced read-only direct tools", () => {
   const tools = collectTools();
-  assert.deepEqual(tools.map(t => t.name), ["deepseek_search", "deepseek_fetch"]);
+  assert.deepEqual(tools.map(t => t.name), ["web_search", "web_fetch"]);
+  assert.deepEqual(tools.map(t => t.label), ["WebSearch", "WebFetch"]);
   for (const tool of tools) {
     assert.equal(tool.annotations?.readOnlyHint, true);
     assert.equal(tool.annotations?.destructiveHint, false);
-    assert.equal(tool.namespace?.name, "deepseek_web");
+    assert.equal(tool.namespace?.name, "dsweb");
+    const modelFacingMetadata = JSON.stringify({
+      description: tool.description,
+      promptSnippet: tool.promptSnippet,
+      promptGuidelines: tool.promptGuidelines,
+      parameters: tool.parameters,
+      namespace: tool.namespace,
+    });
+    assert(!/deepseek/i.test(modelFacingMetadata));
     assert(tool.outputSchema);
     assert(tool.promptSnippet?.trim());
     assert(!/[\r\n]/.test(tool.promptSnippet!));
@@ -110,6 +119,7 @@ test("registered tools execute with mocked transport and reject malformed API da
 
 test("package manifest exposes only the extension entrypoint and host peers", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(manifest.name, "pi-dsweb");
   assert(manifest.keywords.includes("pi-package"));
   assert.deepEqual(manifest.pi.extensions, ["./extensions/index.ts"]);
   assert.equal(manifest.peerDependencies["@earendil-works/pi-coding-agent"], "*");

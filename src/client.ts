@@ -106,8 +106,8 @@ export async function request(operation: "search" | "fetch", input: SearchInput 
   }
   signal?.throwIfAborted();
   if (!key) throw new Error("Set DEEPSEEK_API_KEY before starting Pi, or configure the deepseek provider in Pi with /login. This extension does not load .env.");
-  const timeout = integerSetting(env, "DEEPSEEK_WEB_TIMEOUT_MS", 60_000, 1, 600_000);
-  const retries = integerSetting(env, "DEEPSEEK_WEB_MAX_RETRIES", 2, 0, 5);
+  const timeout = integerSetting(env, "DSWEB_TIMEOUT_MS", 60_000, 1, 600_000);
+  const retries = integerSetting(env, "DSWEB_MAX_RETRIES", 2, 0, 5);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`DeepSeek ${operation} timed out after ${timeout} ms.`)), timeout);
   timer.unref();

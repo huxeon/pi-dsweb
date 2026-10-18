@@ -15,7 +15,7 @@ export const SearchParams = Type.Object({
 }, { additionalProperties: false });
 
 export const FetchParams = Type.Object({
-  url: Type.String({ minLength: 1, maxLength: 8192, description: "HTTP(S) page URL with a host, without username or password. Sent to DeepSeek for retrieval." }),
+  url: Type.String({ minLength: 1, maxLength: 8192, description: "HTTP(S) page URL with a host, without username or password. Sent to the web retrieval service." }),
 }, { additionalProperties: false });
 
 const nullableString = Type.Union([Type.String(), Type.Null()]);

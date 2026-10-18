@@ -4,7 +4,7 @@ import { Value } from "typebox/value";
 import { request, validateFetch, validateSearch } from "../src/client.ts";
 import { SearchParams, SearchResponse } from "../src/schemas.ts";
 
-const env = { DEEPSEEK_API_KEY: "sk-contract-test", DEEPSEEK_WEB_MAX_RETRIES: "0" };
+const env = { DEEPSEEK_API_KEY: "sk-contract-test", DSWEB_MAX_RETRIES: "0" };
 const searchResult = {
   rerank_score: 2.4,
   title: "DeepSeek V4 model released",
@@ -77,7 +77,7 @@ test("only HTTP 200 is treated as success; unexpected 2xx are not retried", asyn
 test("nonstandard 600 status is not mistaken for a retryable 5xx", async () => {
   let calls = 0;
   await assert.rejects(request("search", { query: "hi" }, undefined, {
-    env: { ...env, DEEPSEEK_WEB_MAX_RETRIES: "2" },
+    env: { ...env, DSWEB_MAX_RETRIES: "2" },
     fetch: async () => {
       calls++;
       return { status: 600, text: async () => "{}", headers: new Headers() } as Response;

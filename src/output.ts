@@ -28,7 +28,7 @@ export async function makeResult<T extends SearchData | FetchData>(response: T, 
   let fullOutputPath: string | undefined;
   let content = preview.content;
   if (truncated) {
-    const dir = await mkdtemp(join(tmpdir(), "pi-deepseek-web-"));
+    const dir = await mkdtemp(join(tmpdir(), "pi-dsweb-"));
     fullOutputPath = join(dir, "response.json");
     await withFileMutationQueue(fullOutputPath, async () => {
       signal?.throwIfAborted();

@@ -1,5 +1,5 @@
 {
-  "name": "pi-deepseek-web",
+  "name": "pi-dsweb",
   "version": "0.1.0",
   "description": "DeepSeek Search and Fetch tools for Pi",
   "type": "module",
