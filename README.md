@@ -27,7 +27,7 @@ pi -e ./extensions/index.ts
 
 ```powershell
 # 用户级安装
-pi install D:/workspaces/pi-dsweb
+pi install ./
 
 # 或只安装到当前项目
 pi install ./ --local

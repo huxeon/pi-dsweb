@@ -3,3 +3,18 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Local Pi state and credential/configuration files
+.pi/
+auth.json
+credentials.json
+.npmrc
+
+# Private keys and certificate bundles
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local diagnostic output
+*.log
