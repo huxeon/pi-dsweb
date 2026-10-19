@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Value } from "typebox/value";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import extension from "../extensions/index.ts";
-import { formatFetch, formatSearch, makeResult } from "../src/output.ts";
-import { FetchResponse, SearchParams, SearchResponse, resultSchema, type SearchData } from "../src/schemas.ts";
+import { formatSearch } from "../src/output.ts";
+import { fetchBodyPaths, makeFetchResult, makeSearchResult, trackResult } from "./helpers.ts";
+import { FetchResponse, SearchParams, SearchResponse, type SearchData } from "../src/schemas.ts";
 
 const sample: SearchData = { results: [{
   title: "示例文章", url: "https://example.com/article", rerank_score: 2.4,
@@ -23,7 +23,7 @@ function collectTools() {
 test("factory only registers two namespaced read-only direct tools", () => {
   const tools = collectTools();
   assert.deepEqual(tools.map(t => t.name), ["web_search", "web_fetch"]);
-  assert.deepEqual(tools.map(t => t.label), ["WebSearch", "WebFetch"]);
+  assert.deepEqual(tools.map(t => t.label), ["Web Search", "Web Fetch"]);
   for (const tool of tools) {
     assert.equal(tool.annotations?.readOnlyHint, true);
     assert.equal(tool.annotations?.destructiveHint, false);
@@ -37,6 +37,8 @@ test("factory only registers two namespaced read-only direct tools", () => {
     });
     assert(!/deepseek/i.test(modelFacingMetadata));
     assert(tool.outputSchema);
+    assert.equal(typeof tool.renderCall, "function");
+    assert.equal(typeof tool.renderResult, "function");
     assert(tool.promptSnippet?.trim());
     assert(!/[\r\n]/.test(tool.promptSnippet!));
     assert(tool.exposure === undefined || tool.exposure === "direct");
@@ -52,51 +54,51 @@ test("request and response schemas accept official examples", () => {
   assert(!Value.Check(SearchParams, { query: "hi", unknown: true }));
 });
 
-test("search formatting retains URLs, score, authority, summary and body", () => {
+test("search formatting retains metadata and summary but excludes page bodies", () => {
   const text = formatSearch(sample);
-  for (const part of ["示例文章", "https://example.com/article", "Score: 2.4", "Authority: -1", "长摘要", "# 正文"]) assert(text.includes(part));
+  for (const part of ["示例文章", "https://example.com/article", "Score: 2.4", "Authority: -1", "长摘要"]) assert(text.includes(part));
+  assert(!text.includes("# 正文"));
+  assert(!text.includes("短摘要"));
   assert.equal(formatSearch({ results: [] }), "No matching web results.");
 });
 
-test("small results expose complete structured responses", async () => {
-  const result = await makeResult(sample, formatSearch(sample));
-  assert.deepEqual(result.structuredContent.response, sample);
-  assert.equal(result.structuredContent.truncated, false);
-  assert(Value.Check(resultSchema(SearchResponse), result.structuredContent));
+test("search exposes the raw API response as structured output", async () => {
+  const result = await makeSearchResult(sample);
+  assert.equal(result.structuredContent, sample);
+  assert(Value.Check(SearchResponse, result.structuredContent));
+  assert.deepEqual(collectTools()[0].outputSchema, SearchResponse);
 });
 
-test("large UTF-8 single-line responses are bounded and saved in full", async () => {
+test("large fetch bodies are bounded in text, saved as Markdown, and raw in codemode", async () => {
   const page = { title: "Large", content: "你好😀".repeat(20_000) };
-  const result = await makeResult(page, formatFetch("https://example.com", page));
-  const file = result.structuredContent.fullOutputPath!;
-  try {
-    assert.equal(result.structuredContent.truncated, true);
-    assert.equal(result.structuredContent.response, undefined);
-    assert.equal((result.details as Record<string, unknown>).response, undefined);
-    assert(Buffer.byteLength(result.content[0].text) < 50 * 1024);
-    assert(result.content[0].text.includes(file));
-    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), page);
-    assert(Value.Check(resultSchema(FetchResponse), result.structuredContent));
-  } finally { await rm(dirname(file), { recursive: true, force: true }); }
+  const result = await makeFetchResult(page);
+  const file = fetchBodyPaths(result)[0];
+  assert(file);
+  assert.equal(result.details.truncated, true);
+  assert.equal(result.structuredContent, page);
+  assert(Buffer.byteLength(result.details.content) <= 48 * 1024);
+  assert(Buffer.byteLength(result.content[0].text) < 50 * 1024);
+  assert.equal(await readFile(file, "utf8"), page.content);
+  assert(Value.Check(FetchResponse, result.structuredContent));
+  assert.deepEqual(collectTools()[1].outputSchema, FetchResponse);
 });
 
-test("many lines trigger truncation even below byte limit", async () => {
+test("many body lines trigger fetch truncation even below byte limit", async () => {
   const page = { title: "Lines", content: "x\n".repeat(2100) };
-  const result = await makeResult(page, formatFetch("https://example.com", page));
-  try {
-    assert.equal(result.structuredContent.truncated, true);
-    assert(result.content[0].text.split("\n").length <= 2000);
-  } finally { await rm(dirname(result.structuredContent.fullOutputPath!), { recursive: true, force: true }); }
+  const result = await makeFetchResult(page);
+  assert.equal(result.details.truncated, true);
+  assert(result.content[0].text.split("\n").length <= 2000);
+  assert.equal(result.structuredContent, page);
 });
 
-test("hidden raw fields cannot bypass the structured response size limit", async () => {
+test("large raw search fields are returned intact without a preview wrapper", async () => {
   const data = structuredClone(sample);
   data.results[0].snippet = "x".repeat(60_000);
-  const result = await makeResult(data, formatSearch(data));
-  try {
-    assert(result.structuredContent.truncated);
-    assert.equal(result.structuredContent.response, undefined);
-  } finally { await rm(dirname(result.structuredContent.fullOutputPath!), { recursive: true, force: true }); }
+  const result = await makeSearchResult(data);
+  assert.equal(result.structuredContent, data);
+  assert.equal(result.structuredContent.results[0].snippet.length, 60_000);
+  assert(Array.isArray(result.details));
+  assert(!("preview" in result.structuredContent));
 });
 
 test("registered tools execute with mocked transport and reject malformed API data", async (t) => {
@@ -109,10 +111,14 @@ test("registered tools execute with mocked transport and reject malformed API da
   const tools = collectTools();
   const transport = t.mock.method(globalThis, "fetch", async (url: string) => new Response(JSON.stringify(url.endsWith("search") ? sample : { title: "Article", content: "# Markdown" })));
   const signal = new AbortController().signal;
-  const search = await tools[0].execute("search-test", { query: "hello", count: 1 }, signal, undefined, {} as never);
+  const search = trackResult(await tools[0].execute("search-test", { query: "hello", count: 1 }, signal, undefined, {} as never));
   assert(search.content[0].type === "text" && search.content[0].text.includes("长摘要"));
-  const page = await tools[1].execute("fetch-test", { url: "https://example.com" }, signal, undefined, {} as never);
+  assert.deepEqual(search.structuredContent, sample);
+  assert(search.content[0].type === "text" && !search.content[0].text.includes("# 正文"));
+  const page = trackResult(await tools[1].execute("fetch-test", { url: "https://example.com" }, signal, undefined, {} as never));
   assert(page.content[0].type === "text" && page.content[0].text.includes("# Markdown"));
+  assert.deepEqual(page.structuredContent, { title: "Article", content: "# Markdown" });
+  assert(page.content[0].type === "text" && !page.content[0].text.includes("https://example.com"));
   transport.mock.mockImplementation(async () => new Response(JSON.stringify({ results: "wrong" })));
   await assert.rejects(tools[0].execute("bad", { query: "hi" }, signal, undefined, {} as never), /unexpected response schema/);
 });
@@ -124,5 +130,6 @@ test("package manifest exposes only the extension entrypoint and host peers", as
   assert.deepEqual(manifest.pi.extensions, ["./extensions/index.ts"]);
   assert.equal(manifest.peerDependencies["@earendil-works/pi-coding-agent"], "*");
   assert.equal(manifest.peerDependencies.typebox, "*");
+  assert.equal(manifest.peerDependencies["@earendil-works/pi-tui"], "*");
   assert.equal(manifest.dependencies, undefined);
 });

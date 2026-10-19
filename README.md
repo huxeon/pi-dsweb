@@ -51,7 +51,7 @@ npm ci
 npm run check
 ```
 
-`@earendil-works/pi-coding-agent` 和 `typebox` 都声明为 `peerDependencies: "*"`，同时作为开发依赖用于检查与测试；它们**不是运行时 dependencies，也不会打包进扩展**。
+`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui` 和 `typebox` 都声明为 `peerDependencies: "*"`，同时作为开发依赖用于检查与测试；它们**不是运行时 dependencies，也不会打包进扩展**。
 
 ## 使用
 
@@ -77,7 +77,7 @@ npm run check
 
 支持的 query 语法：`site:`、`-site:`、`-关键词`、`-"排除短语"`、`"精确短语"`、`lang:zh,en`、`after:2025-01-01`、`before:2026`，以及站点条件之间的 `OR`。搜索语法原样发送，不擅自改写。
 
-工具正文展示标题、URL、站点、时间、排名分、权威分、长摘要（缺失时使用短摘要）和可选正文。结构化响应保留官方全部字段，包括 `snippet`、`summary`、`site_icon` 等。没有匹配结果是正常成功，不是错误。
+模型可见的工具正文展示标题、URL、站点、时间、排名分、权威分和 `summary`，不回退到 `snippet`，不做整体字节数或行数截断。非空网页 `content` 不内联展示，而是逐条原样保存为系统临时目录下的 `pi-dsweb-search-*/result-N.md`，在对应条目中提供路径，供模型按需使用 `read` 读取。没有网页正文时不创建文件；保存失败则报错，取消或执行失败会清理本次已写入的正文文件。codemode 直接返回原始 API 响应，保留全部字段与完整正文，不增加包装或截断。没有匹配结果是正常成功，不是错误。
 
 ### web_fetch
 
@@ -87,30 +87,55 @@ npm run check
 | --- | --- | --- |
 | `url` | string，必填 | 最多 8192 字符的 HTTP/HTTPS URL，必须有 host，不能包含用户名或密码 |
 
-返回页面标题和 Markdown 正文。实际抓取在 DeepSeek 服务端进行，不是本地浏览器；目标站点的策略或内容类型可能导致无法抓取。
+模型正文直接展示页面标题和 Markdown 正文，不额外重复请求 URL。正文超过约 **48 KiB／1900 行** 时，仅保留开头片段，并将完整原始正文保存到系统临时目录 `pi-dsweb-fetch-*/content.md`，在模型正文末尾提供路径和 `read` 提示；未截断时不创建文件。codemode 始终直接返回完整原始 `{ title, content }`，不包装、不截断。实际抓取在 DeepSeek 服务端进行，不是本地浏览器；目标站点的策略或内容类型可能导致无法抓取。
+
+### 终端展示
+
+- 调用标题使用 **WebSearch** / **WebFetch**，显示搜索词或 URL，而不是完整参数对象。
+- 搜索折叠态以普通文字色加粗显示结果总数，耗时保持灰色；前 3 条标题及域名紧凑排列，不增加空行。域名预留宽度，窄终端自动分行。抓取先以灰色显示原始正文 UTF-8 大小和耗时，再显示截断警告（如有），最后以普通文字色、单独一行显示标题，折叠态使用普通字重，展开态加粗；两种状态顺序一致。不重复显示域名或 URL，避免长标题挤掉状态。
+- 运行时显示搜索中/抓取中，完成后显示耗时；无结果与请求失败分别展示。错误按实际终端显示行数限制：折叠最多 3 行，展开最多 20 行，省略时明确提示。
+- 使用 Pi 的工具展开操作（界面显示当前快捷键，也支持 Pi 提供的点击展开）查看详情。
+- 搜索展开态在头部与列表之间、各条目之间各留一行空白；条目标题加粗，域名和来源 URL 使用灰色，短摘要使用普通文字色。展示全部返回结果，不额外限制结果数量（API 的请求参数 `count` 范围仍为 1–50）。摘要只使用 `snippet`，不回退到 `summary`；模型正文只使用 `summary`。各条独立限制显示长度，不铺开网页正文，也不显示完整 JSON 文件路径或相关入口提示。
+- 抓取展开态基于模型收到的正文片段渲染 Markdown，但最多展示 **40 个终端渲染行**，超出时以灰色显示 `... Preview limited to 40 lines`；终端换行也计入这 40 行。展开态在元数据／截断提示与标题之间、标题与正文之间、正文与省略提示之间各留一行空白；折叠态保持紧凑。标题、大小、耗时和状态提示另计，不额外添加请求 URL 或文件路径。该 UI 限制不影响模型正文的 48 KiB／1900 源文行阈值，也不影响 codemode 原始响应。
+- 搜索保存非空网页正文，抓取仅在正文截断时保存完整正文，均为原始 Markdown 文件；路径提供给模型，不在结果前端显示。不再保存完整 JSON 文件。保存发生在工具执行阶段，渲染函数不读写文件。
+- 抓取正文截断时有独立警告色提示 `⚠ Content truncated for model`，不会被长标题裁掉；完整正文文件保存失败会报错，取消或执行失败会清理本次已写入的文件。未截断时不依赖临时文件。搜索不做整体输出截断。
+- 外部文本中的终端控制序列与双向覆盖字符仅在展示时清理，不修改 API 原始响应。渲染后的 Markdown 保留主题样式，但不传递 OSC 超链接或终端控制命令。
+- 搜索 `details` 直接使用结果数组 `[{ title, domain, url, snippet }, ...]`，没有 `view`、`kind`、`count` 或 `items` 包装；结果总数取数组长度。条目保存有界标题、域名、URL 及 `snippet`，不保存冗余的 `truncated` 或临时目录元数据。Pi 只向自定义渲染器传递 `content` 和 `details`，不传递 `structuredContent`，因此这些展示字段仍需保留。搜索渲染器只接受当前数组格式，不兼容旧对象格式或嵌套 `details.view`；没有可用数组时提示预览不可用，不回退展示含长摘要或文件路径的模型正文。抓取 `details` 为扁平的 `{ title, bytes, content, truncated }`，其中 `content` 是实际展示的正文片段；没有 `view`、`kind` 或文件路径包装，不兼容旧会话格式。
+- 通过 Pi 的 `lastComponent` 复用组件和 Markdown 缓存，内容或主题变化时更新，重绘和调整宽度时不重复创建同一内容的 Markdown 组件。
 
 ### 结构化输出与大结果
 
-两个工具都声明了 `outputSchema`，可由 Pi 的 codemode 调用。正常结果的结构为：
+两个工具都声明原始响应 `outputSchema`，codemode 直接获得完整 API JSON，不包装、不截断。
+
+**搜索：**
 
 ```typescript
 {
-  preview: string;          // 与模型可见正文相同
-  truncated: false;
-  response: {
-    results: Array<...>;   // search：官方完整 JSON
-  } | {
-    title: string;         // fetch：官方完整 JSON
+  results: Array<{
+    // 其余官方字段同样原样保留
+    title: string;
+    url: string;
+    snippet: string;
+    summary: string;
     content: string;
-  };
+  }>;
 }
 ```
 
-当正文超出约 **48 KiB 或 1900 行**，或原始 JSON 超过相同阈值时：
+**抓取：**
 
-- 模型和 codemode 只收到有界的 `preview`、`truncated: true` 和 `fullOutputPath`。
-- `response` 被省略，避免通过结构化返回值或 `details` 绕过截断。
-- 完整 API JSON 保存在系统临时目录 `pi-dsweb-*/response.json`，可使用 `read` 分段读取。
+```typescript
+{
+  title: string;
+  content: string;
+}
+```
+
+普通模型正文与 codemode 的用途不同：
+
+- 搜索正文使用完整 `summary`，网页 `content` 保存为临时 Markdown 文件并提供路径。
+- 抓取正文直接展示 `content`，只在正文超过约 **48 KiB 或 1900 行** 时截断，并将完整原始正文保存为 Markdown 文件、向模型提供 `read` 路径。
+- 抓取是否截断仅由正文决定，不再根据原始 JSON 的大小或行数截断；codemode 始终保留完整原始响应。
 - 临时文件不会随会话结束自动删除，以便稍后读取；不再需要时可手动删除。内容可能敏感，请注意临时目录与会话的访问权限。
 
 codemode 示例（需要先启用 Pi 的 codemode 工具）：
@@ -120,15 +145,15 @@ const r = await tools.web_search({
   query: "DeepSeek site:github.com",
   count: 3,
 });
-if (r.truncated) {
-  text({ preview: r.preview, fullOutputPath: r.fullOutputPath });
-} else {
-  text(r.response.results.map(item => ({
-    title: item.title,
-    url: item.url,
-    summary: item.summary,
-  })));
-}
+text(r.results.map(item => ({
+  title: item.title,
+  url: item.url,
+  summary: item.summary,
+})));
+
+const page = await tools.web_fetch({ url: "https://example.com/article" });
+text(page.title);
+text(page.content); // 完整原始正文，不是截断预览
 ```
 
 ## 配置
@@ -164,7 +189,7 @@ API 域名固定为官方 `https://api.deepseek.com`，不跟随重定向，避�
 - **URL 校验**：除 HTTP(S)、host、长度和无用户名/密码外，本扩展还拒绝首尾空白、控制字符和反斜杠，不让 Node 的 URL 解析器自动修复 `https:example.com` 等畸形输入。URL 不会被规范化后重新发送。
 - **问题校验**：`query` 不允许全部为空白；`ori_question` 只按文档校验 1–128 个 Unicode 字符或 null，不额外套用 query 的空白限制。
 - **响应校验**：仅把 HTTP 200 当作成功，校验必需字段及类型；`rerank_score` 为 0–3，`authority` 为 -1–4 的整数，`date` 为 RFC 3339 日期时间或 null。不会额外过滤低分结果，也不会重排结果。日期原样保留，不在本地转换时区。
-- **结果封装**：`preview`、`response`、`truncated`、`fullOutputPath` 是扩展输出层；不是官方响应字段。响应较小时 `response` 保存官方 JSON，较大时改为完整 JSON 文件。
+- **结果处理**：搜索和抓取的 codemode 结果均直接使用完整官方响应。搜索普通正文只使用 `summary`，将网页正文保存为临时 Markdown 文件并提供路径，不整体截断；抓取普通正文直接展示标题和正文，正文超限时截断并提供完整 Markdown 文件路径。截断和展示元数据仅属于扩展输出，不修改 API 原始响应。
 - **重试与安全**：官方建议 408 / 429 / 5xx 后等待重试；默认额外重试 2 次、指数退避、`Retry-After` 支持、等待上限、总请求超时、拒绝重定向和凭据复用，均为本扩展策略。网络或响应体读取异常不自动重试。
 
 Pi 工具定义包含 `description`、`promptSnippet`、`promptGuidelines`、输入/输出 schema、`structuredContent` 和 `details`；扩展工厂不发网络请求，也不启动后台任务。
@@ -187,7 +212,9 @@ pi-dsweb/
 ├── src/
 │   ├── client.ts          # 参数校验、HTTP、超时、取消、重试
 │   ├── schemas.ts         # TypeBox 请求/响应 schema
-│   └── output.ts          # 格式化、截断和临时文件
+│   ├── output.ts          # 格式化、截断和临时文件
+│   ├── presentation.ts    # 有界展示元数据和文本清理
+│   └── renderers.ts       # 调用标题、折叠摘要和 Markdown 详情
 ├── tests/                 # 离线测试，不访问真实接口或消耗余额
 ├── .env.example
 ├── tsconfig.json

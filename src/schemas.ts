@@ -11,7 +11,7 @@ export const SearchParams = Type.Object({
     description: "Original user question (1–128 characters); null means omitted.",
   })),
   localization: Type.Optional(Type.String({ description: "IP address used to prioritize localized results (default empty)." })),
-  need_content: Type.Optional(Type.Boolean({ default: false, description: "Include page body in each result; otherwise content is empty." })),
+  need_content: Type.Optional(Type.Boolean({ default: false, description: "Request page bodies; tool text provides local Markdown file paths, while structured results retain content. Otherwise content is empty." })),
 }, { additionalProperties: false });
 
 export const FetchParams = Type.Object({
@@ -39,14 +39,3 @@ export type SearchInput = Static<typeof SearchParams>;
 export type FetchInput = Static<typeof FetchParams>;
 export type SearchData = Static<typeof SearchResponse>;
 export type FetchData = Static<typeof FetchResponse>;
-
-// Large responses are represented by a bounded preview and a full JSON file,
-// rather than leaking an unbounded response through codemode or tool details.
-export function resultSchema(response: typeof SearchResponse | typeof FetchResponse) {
-  return Type.Object({
-    preview: Type.String(),
-    truncated: Type.Boolean(),
-    response: Type.Optional(response),
-    fullOutputPath: Type.Optional(Type.String()),
-  });
-}

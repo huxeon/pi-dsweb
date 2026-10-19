@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import extension from "../extensions/index.ts";
 import { request } from "../src/client.ts";
+import { trackResult } from "./helpers.ts";
 
 test("environment key takes precedence without invoking Pi's resolver", async () => {
   await request("search", { query: "hi" }, undefined, {
@@ -78,7 +79,7 @@ test("both registered tools resolve only deepseek credentials on every execution
     return new Response(JSON.stringify(calls === 1 ? { results: [] } : { title: "Article", content: "# Body" }));
   });
   const signal = new AbortController().signal;
-  await tools[0].execute("search", { query: "hi" }, signal, undefined, ctx as never);
-  await tools[1].execute("fetch", { url: "https://example.com" }, signal, undefined, ctx as never);
+  trackResult(await tools[0].execute("search", { query: "hi" }, signal, undefined, ctx as never));
+  trackResult(await tools[1].execute("fetch", { url: "https://example.com" }, signal, undefined, ctx as never));
   assert.equal(calls, 2);
 });
