@@ -37,7 +37,7 @@ test("Fetch keeps and wraps the complete 8192-character URL like a built-in call
   assert.deepEqual(args, original);
 });
 
-test("Search expands all 128 Unicode characters and preserves search syntax and options", () => {
+test("Search always wraps all 128 Unicode characters and preserves search syntax and options", () => {
   const syntax = 'site:github.com OR site:huggingface.co "release notes" -"spam ads" lang:zh after:2025 ';
   const query = syntax + "中".repeat(128 - [...syntax].length - "END_MARKER".length) + "END_MARKER";
   const args = { query, count: 50, need_content: true };
@@ -45,8 +45,12 @@ test("Search expands all 128 Unicode characters and preserves search syntax and 
   assert.equal([...query].length, 128);
   assert(Value.Check(SearchParams, args));
   const folded = renderSearchCall(args, theme, context());
-  assert.equal(rows(folded).length, 1);
-  assert(!compactText(folded).includes("END_MARKER"));
+  assert(rows(folded).length > 1);
+  for (const width of [8, 24, 48, 80]) {
+    const output = compactText(folded, width);
+    assert.equal(output, "web_search" + query.replace(/\s/g, "") + "(count50,content)");
+    assert(!output.includes("..."));
+  }
   const expanded = renderSearchCall(args, theme, context({ expanded: true, lastComponent: folded }));
   assert.equal(expanded, folded);
   const text = compactText(expanded);
@@ -86,22 +90,22 @@ test("expanded call components refresh arguments and theme without retaining sta
   assert(compactText(second, 24).includes("https://example.org/updated"));
 });
 
-test("Pi's actual expansion toggles complete call arguments without changing inputs", () => {
+test("Pi keeps complete call arguments visible before and after expansion without changing inputs", () => {
   const cases = [
-    { name: "web_fetch", args: { url }, renderer: renderFetchCall, expected: url, foldedHides: false },
-    { name: "web_search", args: { query: "中".repeat(118) + "END_MARKER" }, renderer: renderSearchCall, expected: "中".repeat(118) + "END_MARKER", foldedHides: true },
+    { name: "web_fetch", args: { url }, renderer: renderFetchCall, expected: url },
+    { name: "web_search", args: { query: "中".repeat(118) + "END_MARKER" }, renderer: renderSearchCall, expected: "中".repeat(118) + "END_MARKER" },
   ];
   for (const item of cases) {
     const original = structuredClone(item.args);
     const component = new ToolExecutionComponent(item.name, "host-layout", item.args, {},
       { renderCall: item.renderer as NonNullable<ToolDefinition["renderCall"]> }, { requestRender() {} } as unknown as TUI, process.cwd());
-    if (item.foldedHides) assert(!compactText(component).includes("END_MARKER"));
-    else assert(compactText(component).includes("END_MARKER"));
+    assert(compactText(component).includes(item.expected));
+    assert(!compactText(component).includes("..."));
     component.setExpanded(true);
     assert(compactText(component).includes(item.expected));
     component.setExpanded(false);
-    if (item.foldedHides) assert(!compactText(component).includes("END_MARKER"));
-    else assert(compactText(component).includes("END_MARKER"));
+    assert(compactText(component).includes(item.expected));
+    assert(!compactText(component).includes("..."));
     assert.deepEqual(item.args, original);
   }
 });

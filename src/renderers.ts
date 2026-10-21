@@ -3,7 +3,7 @@ import {
   type AgentToolResult, type Theme, type ToolDefinition, type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { formatFetchLines, safeText, singleLine, type FetchDetails, type SearchItemView } from "./presentation.ts";
+import { formatFetchLines, safeText, type FetchDetails, type SearchItemView } from "./presentation.ts";
 import type { FetchInput, SearchInput } from "./schemas.ts";
 import { startToolTimer, toolTimerText } from "./timing.ts";
 
@@ -14,39 +14,22 @@ type Operation = "search" | "fetch";
 const RESULT_PREVIEW_LINES = 5;
 const ERROR_PREVIEW_LINES = 10;
 
-/** Keep folded calls to one line; expanded calls wrap complete arguments. */
-class CallLine implements Component {
-  private text = "";
-  private expanded = false;
-  private readonly wrapped = new Text("", 0, 0);
-  update(text: string, expanded: boolean) {
-    if (text !== this.text) {
-      this.text = text;
-      this.wrapped.setText(text);
-    }
-    this.expanded = expanded;
-  }
-  invalidate() { this.wrapped.invalidate(); }
-  render(width: number): string[] {
-    if (width <= 0) return [];
-    return this.expanded
-      ? this.wrapped.render(width).map(line => clip(line, width))
-      : [clip(this.text, width)];
-  }
-}
-
-function callLine(context: RenderContext, text: string): Component {
-  const component = context.lastComponent instanceof CallLine ? context.lastComponent : new CallLine();
-  component.update(text, context.expanded);
-  return component;
-}
-
 /** Built-in call lines wrap naturally and guard the zero-width case. */
 class CallText implements Component {
   private readonly text = new Text("", 0, 0);
   update(text: string) { this.text.setText(text); }
   invalidate() { this.text.invalidate(); }
-  render(width: number): string[] { return width <= 0 ? [] : this.text.render(width); }
+  render(width: number): string[] {
+    // A wide Unicode glyph cannot fit a one-column viewport; avoid overflow
+    // without introducing an ellipsis or resetting styles on ordinary rows.
+    return width <= 0 ? [] : this.text.render(width).map(line => truncateToWidth(line, width, ""));
+  }
+}
+
+function callText(context: RenderContext, text: string): Component {
+  const component = context.lastComponent instanceof CallText ? context.lastComponent : new CallText();
+  component.update(text);
+  return component;
 }
 
 function clip(line: string, width: number): string { return truncateToWidth(line, width, "..."); }
@@ -58,12 +41,12 @@ function mutedHint(theme: Theme, text: string, hint: string): string {
 
 export function renderSearchCall(args: Partial<SearchInput>, theme: Theme, context: RenderContext): Component {
   startToolTimer(context);
-  const query = args.query ? (context.expanded ? safeText(args.query) : singleLine(args.query)) : "";
+  const query = args.query ? safeText(args.query) : "";
   const flags = [
     args.count !== undefined ? `count ${args.count}` : "",
     args.need_content ? "content" : "",
   ].filter(Boolean);
-  return callLine(context,
+  return callText(context,
     theme.fg("toolTitle", theme.bold("web_search")) + " " +
     (query ? theme.fg("accent", query) : theme.fg("muted", "...")) +
     (flags.length ? theme.fg("muted", ` (${flags.join(", ")})`) : ""),
@@ -73,10 +56,8 @@ export function renderSearchCall(args: Partial<SearchInput>, theme: Theme, conte
 /** Built-in call lines keep the full argument and let Text wrap it. */
 export function renderFetchCall(args: Partial<FetchInput>, theme: Theme, context: RenderContext): Component {
   startToolTimer(context);
-  const component = context.lastComponent instanceof CallText ? context.lastComponent : new CallText();
-  component.update(theme.fg("toolTitle", theme.bold("web_fetch")) + " " +
+  return callText(context, theme.fg("toolTitle", theme.bold("web_fetch")) + " " +
     (args.url ? theme.fg("accent", safeText(args.url)) : theme.fg("muted", "...")));
-  return component;
 }
 
 function fetchDetailsOf(value: unknown): FetchDetails | undefined {
