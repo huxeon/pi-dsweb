@@ -3,7 +3,7 @@ import {
   type AgentToolResult, type Theme, type ToolDefinition, type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { safeText, singleLine, type FetchDetails, type SearchItemView } from "./presentation.ts";
+import { formatFetchLines, safeText, singleLine, type FetchDetails, type SearchItemView } from "./presentation.ts";
 import type { FetchInput, SearchInput } from "./schemas.ts";
 import { startToolTimer, toolTimerText } from "./timing.ts";
 
@@ -100,18 +100,36 @@ function searchOutputLines(items: SearchItemView[]): string[] {
   return lines;
 }
 
-function formatSearch(details: unknown, expanded: boolean, theme: Theme): string {
-  const items = Array.isArray(details) ? details as SearchItemView[] : undefined;
-  if (!items) return "\n" + theme.fg("muted", "Search preview unavailable.");
-  if (!items.length) return "\n" + theme.fg("muted", "No matching web results");
-  const all = searchOutputLines(items);
+function isSearchItem(value: unknown): value is SearchItemView {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Partial<SearchItemView>;
+  return typeof item.title === "string" && typeof item.domain === "string" &&
+    typeof item.url === "string" && typeof item.snippet === "string";
+}
+
+/** Validate persisted UI details as well as freshly generated tool output. */
+function searchItemsOf(value: unknown): SearchItemView[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  // Array.from also checks sparse slots instead of silently skipping them.
+  const items = Array.from(value);
+  return items.every(isSearchItem) ? items : undefined;
+}
+
+function previewLines(all: readonly string[], expanded: boolean, theme: Theme): string[] {
   const shown = expanded ? all : all.slice(0, RESULT_PREVIEW_LINES);
   const hidden = all.length - shown.length;
   const lines = ["", ...shown.map(line => theme.fg("toolOutput", line))];
   if (hidden > 0) {
     lines.push(mutedHint(theme, `... (${hidden} more line${hidden === 1 ? "" : "s"},`, "to expand"));
   }
-  return lines.join("\n");
+  return lines;
+}
+
+function formatSearch(details: unknown, expanded: boolean, theme: Theme): string {
+  const items = searchItemsOf(details);
+  if (!items) return "\n" + theme.fg("muted", "Search preview unavailable.");
+  if (!items.length) return "\n" + theme.fg("muted", "No matching web results");
+  return previewLines(searchOutputLines(items), expanded, theme).join("\n");
 }
 
 /** Fetch previews the same text prefix as search; expansion reveals the remainder. */
@@ -120,16 +138,7 @@ function formatFetch(details: FetchDetails | undefined, expanded: boolean, theme
   const body = safeText(details.content).replace(/\t/g, "   ");
   const bodyLines = body.split("\n");
   while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === "") bodyLines.pop();
-  const all = [
-    ...(details.title ? [`Title: ${details.title}`, ""] : []),
-    ...bodyLines,
-  ];
-  const shown = expanded ? all : all.slice(0, RESULT_PREVIEW_LINES);
-  const hidden = all.length - shown.length;
-  const lines = ["", ...shown.map(line => theme.fg("toolOutput", line))];
-  if (hidden > 0) {
-    lines.push(mutedHint(theme, `... (${hidden} more line${hidden === 1 ? "" : "s"},`, "to expand"));
-  }
+  const lines = previewLines(formatFetchLines(details.title, bodyLines), expanded, theme);
   if (details.truncated) {
     lines.push("", theme.fg("warning", `[Truncated: showing ${details.outputLines} of ${details.totalLines} lines]`));
   }

@@ -32,6 +32,12 @@ export function displayLine(text: string): string {
   return safeText(text).replace(/\s+/g, " ").trim();
 }
 
+/** Shared Fetch layout; callers control body normalization and line handling. */
+export function formatFetchLines(title: string, bodyLines: readonly string[]): string[] {
+  const heading = displayLine(title);
+  return [...(heading ? [`Title: ${heading}`, ""] : []), ...bodyLines];
+}
+
 export function singleLine(text: string, limit = 240): string {
   const clean = displayLine(text);
   const chars = [...clean];

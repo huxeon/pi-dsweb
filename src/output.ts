@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { truncateHead, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { FetchData, SearchData } from "./schemas.ts";
-import { buildSearchItems, displayLine, type FetchDetails } from "./presentation.ts";
+import { buildSearchItems, displayLine, formatFetchLines, type FetchDetails } from "./presentation.ts";
 
 /** Headings and metadata are single-line fields: collapsed whitespace keeps an
  * embedded newline from injecting extra Markdown structure into model text.
@@ -20,8 +20,7 @@ export function formatSearch(data: SearchData, bodyPaths: ReadonlyMap<number, st
 }
 
 export function formatFetch(data: FetchData): string {
-  const title = displayLine(data.title);
-  return title ? `Title: ${title}\n\n${data.content}` : data.content;
+  return formatFetchLines(data.title, data.content.split("\n")).join("\n");
 }
 
 /** Search summaries are untruncated; page bodies live in separate Markdown files.
@@ -39,7 +38,7 @@ export async function makeSearchResult(response: SearchData, signal?: AbortSigna
       const path = join(contentDirectory, `result-${index + 1}.md`);
       await withFileMutationQueue(path, async () => {
         signal?.throwIfAborted();
-        await writeFile(path, item.content, { encoding: "utf8", mode: 0o600 });
+        await writeFile(path, item.content, { encoding: "utf8", mode: 0o600, signal });
       });
       bodyPaths.set(index, path);
     }

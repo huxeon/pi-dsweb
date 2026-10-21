@@ -112,6 +112,27 @@ test("partial results without a started clock stay empty; failures remain explic
   }
 });
 
+test("malformed search details fail closed without throwing or leaking model text", () => {
+  const valid = buildSearchItems(data)[0];
+  const malformed: unknown[] = [
+    undefined, null, {}, [null], [123], [[]], [{}], new Array(1),
+    ...["title", "domain", "url", "snippet"].flatMap(field => [
+      [{ ...valid, [field]: null }],
+      [{ ...valid, [field]: 123 }],
+    ]),
+    [valid, { ...valid, snippet: false }],
+  ];
+  for (const details of malformed) {
+    for (const expanded of [false, true]) {
+      const result = { content: [{ type: "text" as const, text: "PRIVATE MODEL SUMMARY /tmp/private.md" }], details };
+      const output = text(renderSearchResult(result, { expanded, isPartial: false }, theme, context()));
+      assert(output.includes("Search preview unavailable."));
+      assert(!output.includes("PRIVATE MODEL"));
+      assert(!output.includes(valid.title));
+    }
+  }
+});
+
 test("fetch does not fall back to model text for obsolete details", () => {
   const result = { content: [{ type: "text" as const, text: "Legacy response text" }], details: { truncated: false } };
   const output = text(renderFetchResult(result, { expanded: true, isPartial: false }, theme, context()));
@@ -210,6 +231,18 @@ test("both tools preview exactly five logical lines and preserve that prefix on 
       assert(!expandedRows.some(row => row.includes("more line")));
       assert.deepEqual(result, original);
     }
+  }
+});
+
+test("Fetch UI and model share the same title/body layout without altering raw escapes", async () => {
+  for (const title of ["Page", "", "  ", "Page\nsecond line"]) {
+    const page = { title, content: String.raw`\# Heading
+
+need\_content` };
+    const result = await makeFetchResult(page);
+    const output = text(renderFetchResult(result, { expanded: true, isPartial: false }, theme, context()));
+    assert.equal(output, `\n${result.content[0].text}\n\nTook 1.2s`);
+    assert.equal(result.structuredContent.content, page.content);
   }
 });
 

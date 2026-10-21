@@ -123,6 +123,20 @@ test("cancellation cleans partially written page bodies and pre-aborted calls wr
   assert.deepEqual(await readdir(root), []);
 });
 
+test("search passes cancellation to the file writer and cleans an interrupted write", async (t) => {
+  const root = await isolatedTemp(t);
+  const controller = new AbortController();
+  // Native throwIfAborted reads the signal's internal state. This getter is
+  // consulted by writeFile itself, so cancellation occurs at the writer boundary.
+  const aborted = t.mock.getter(controller.signal, "aborted", () => {
+    controller.abort();
+    return true;
+  });
+  await assert.rejects(makeSearchResult({ results: [item(1, "body")] }, controller.signal), { name: "AbortError" });
+  assert(aborted.mock.callCount() > 0);
+  assert.deepEqual(await readdir(root), []);
+});
+
 test("failure to save requested page bodies is an error, not a nonexistent path", async (t) => {
   const root = await isolatedTemp(t);
   const blocker = join(root, "not-a-directory");
