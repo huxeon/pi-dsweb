@@ -63,7 +63,7 @@ test("both registered tools resolve only deepseek credentials on every execution
     else process.env.DEEPSEEK_API_KEY = previous;
   });
   const tools: ToolDefinition[] = [];
-  extension({ registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
+  extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
   let calls = 0;
   const ctx = {
     model: { provider: "another-provider" },

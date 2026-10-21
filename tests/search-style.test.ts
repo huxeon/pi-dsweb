@@ -26,43 +26,53 @@ const data = { results: [1, 2].map(i => ({
   site_name: null, site_icon: null, date: null,
 })) };
 
-test("search expansion uses bold neutral headings, muted sources and separated entries", async () => {
+test("search results use uniform Pi toolOutput lines and separated entries", async () => {
   const result = await makeSearchResult(data);
   const original = structuredClone(result);
   const { theme, calls } = recordingTheme();
   const component = renderSearchResult(result, { expanded: true, isPartial: false }, theme, context());
   const rows = component.render(100);
-  const plain = rows.map(stripTerminalSequences);
-  assert(rows[0].includes("\x1b[1m2 results\x1b[22m"));
-  assert(plain[0].includes("1.2s"));
-  assert.equal(plain[1], "");
-  assert(rows[2].includes("\x1b[1m1. Title 1\x1b[22m"));
-  assert.equal(plain[3], "https://example.com/1");
-  assert.equal(plain[4], "Snippet 1");
-  assert.equal(plain[5], "");
-  assert(rows[6].includes("\x1b[1m2. Title 2\x1b[22m"));
+  const plain = rows.map(row => stripTerminalSequences(row).trimEnd());
+  assert.equal(plain[0], "");
+  assert.equal(plain[1], "1. Title 1");
+  assert.equal(plain[2], "https://example.com/1");
+  assert.equal(plain[3], "Snippet 1");
+  assert.equal(plain[4], "");
+  assert.equal(plain[5], "2. Title 2");
+  assert.equal(plain.at(-1), "Took 1.2s");
+  assert(!plain.join("\n").includes("results"));
+  assert(!rows.some(row => row.includes("\x1b[1m")));
   assert(!calls.some(call => call.color === "success"));
-  for (const text of ["example.com", "https://example.com/1", "1.2s"]) {
-    assert(calls.some(call => call.color === "muted" && call.text === text));
+  for (const text of ["1. Title 1", "https://example.com/1", "Snippet 1"]) {
+    assert(calls.some(call => call.color === "toolOutput" && call.text === text));
   }
-  assert(calls.some(call => call.color === "toolOutput" && call.text === "Snippet 1"));
+  assert(calls.some(call => call.color === "muted" && call.text === "Took 1.2s"));
   for (const width of [1, 8, 24, 80]) assert(component.render(width).every(row => visibleWidth(row) <= width));
   assert.deepEqual(result, original);
 });
 
-test("collapsed search stays compact and empty search remains muted", async () => {
-  const result = await makeSearchResult(data);
+test("small search results are fully visible without an expand hint and empty search remains muted", async () => {
+  const result = await makeSearchResult({ results: data.results.slice(0, 1) });
   const { theme, calls } = recordingTheme();
   const rows = renderSearchResult(result, { expanded: false, isPartial: false }, theme, context()).render(100);
-  assert(!rows.includes(""));
-  assert(rows[0].includes("\x1b[1m2 results\x1b[22m"));
-  assert(!rows[1].includes("\x1b[1m"));
+  const plain = rows.map(row => stripTerminalSequences(row).trimEnd());
+  assert.equal(plain[0], "");
+  assert.equal(plain.at(-2), "");
+  assert.equal(plain[1], "1. Title 1");
+  assert.equal(plain[2], "https://example.com/1");
+  assert.equal(plain[3], "Snippet 1");
+  assert(!plain.join("\n").includes("to expand"));
+  assert(!rows.some(row => row.includes("\x1b[1m")));
   calls.length = 0;
   const empty = await makeSearchResult({ results: [] });
-  const output = renderSearchResult(empty, { expanded: true, isPartial: false }, theme, context()).render(100);
-  assert.equal(output.length, 1);
-  assert(output[0].includes("No matching web results"));
-  assert(!output[0].includes("\x1b[1m"));
+  const output = renderSearchResult(empty, { expanded: true, isPartial: false }, theme, context()).render(100)
+    .map(row => stripTerminalSequences(row).trimEnd());
+  assert.equal(output.length, 4);
+  assert.equal(output[0], "");
+  assert.equal(output[2], "");
+  assert.equal(output.at(-1), "Took 1.2s");
+  assert(output[1].includes("No matching web results"));
+  assert(!output[1].includes("\x1b[1m"));
   assert(calls.some(call => call.color === "muted" && call.text === "No matching web results"));
   assert(!calls.some(call => call.color === "success"));
 });

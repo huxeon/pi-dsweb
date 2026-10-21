@@ -3,21 +3,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { truncateHead, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { FetchData, SearchData } from "./schemas.ts";
-import { buildSearchItems, singleLine, type FetchDetails } from "./presentation.ts";
+import { buildSearchItems, displayLine, type FetchDetails } from "./presentation.ts";
 
+/** Headings and metadata are single-line fields: collapsed whitespace keeps an
+ * embedded newline from injecting extra Markdown structure into model text.
+ */
 export function formatSearch(data: SearchData, bodyPaths: ReadonlyMap<number, string> = new Map()): string {
   if (!data.results.length) return "No matching web results.";
   return data.results.map((r, i) => [
-    `## ${i + 1}. ${r.title}`,
-    r.url,
-    `Site: ${r.site_name ?? "unknown"} | Date: ${r.date ?? "unknown"} | Score: ${r.rerank_score} | Authority: ${r.authority}`,
+    `## ${i + 1}. ${displayLine(r.title) || "Untitled result"}`,
+    displayLine(r.url),
+    `Site: ${displayLine(r.site_name ?? "") || "unknown"} | Date: ${displayLine(r.date ?? "") || "unknown"} | Score: ${r.rerank_score} | Authority: ${r.authority}`,
     r.summary,
     ...(bodyPaths.has(i) ? [`Page content file: ${bodyPaths.get(i)}. Use the read tool to inspect it.`] : []),
   ].join("\n\n")).join("\n\n");
 }
 
 export function formatFetch(data: FetchData): string {
-  return [`# ${data.title || "Untitled page"}`, data.content || "(No page content returned.)"].join("\n\n");
+  const title = displayLine(data.title);
+  return title ? `Title: ${title}\n\n${data.content}` : data.content;
 }
 
 /** Search summaries are untruncated; page bodies live in separate Markdown files.
@@ -71,10 +75,12 @@ export async function makeFetchResult(response: FetchData, signal?: AbortSignal)
     }
     signal?.throwIfAborted();
     const details: FetchDetails = {
-      title: singleLine(response.title || "Untitled page", 160),
+      title: displayLine(response.title),
       bytes: Buffer.byteLength(response.content, "utf8"),
       content: preview.content,
       truncated: preview.truncated,
+      totalLines: preview.totalLines,
+      outputLines: preview.outputLines,
     };
     return {
       content: [{ type: "text" as const, text: content }],

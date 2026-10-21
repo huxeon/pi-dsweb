@@ -27,23 +27,45 @@ test("small fetch text contains title/body, with raw codemode output and flat UI
   const original = structuredClone(page);
   const result = await makeFetchResult(page);
   assert.equal(result.content[0].text, formatFetch(page));
-  assert.equal(result.content[0].text, "# Page title\n\n## Heading\n\n正文 😀");
+  assert.equal(result.content[0].text, "Title: Page title\n\n## Heading\n\n正文 😀");
   assert.equal(result.structuredContent, page);
   assert.deepEqual(result.details, {
     title: page.title, bytes: Buffer.byteLength(page.content), content: page.content, truncated: false,
+    totalLines: 3, outputLines: 3,
   });
   assert.deepEqual(page, original);
   assert.deepEqual(await readdir(root), []);
 });
 
-test("empty fetch keeps the raw response and shows a clear empty state without files", async (t) => {
+test("model title collapses newlines instead of injecting Markdown structure", async () => {
+  const page = { title: "Real title\n# Injected heading", content: "body" };
+  const result = await makeFetchResult(page);
+  assert.equal(result.content[0].text, "Title: Real title # Injected heading\n\nbody");
+  assert(!result.content[0].text.includes("\n# Injected"));
+  assert.equal(result.structuredContent, page);
+});
+
+test("empty fetch omits the title and preserves the empty body without files", async (t) => {
   const root = await isolatedTemp(t);
   const page = { title: "", content: "" };
   const result = await makeFetchResult(page);
-  assert.equal(result.content[0].text, "# Untitled page\n\n(No page content returned.)");
+  assert.equal(result.content[0].text, "");
   assert.equal(result.structuredContent, page);
-  assert.deepEqual(result.details, { title: "Untitled page", bytes: 0, content: "", truncated: false });
+  assert.deepEqual(result.details, { title: "", bytes: 0, content: "", truncated: false, totalLines: 0, outputLines: 0 });
   assert.deepEqual(await readdir(root), []);
+});
+
+test("fetch preserves Markdown escapes and omits a missing title without altering the body", async () => {
+  const content = String.raw`\# Heading
+
+https\:\/\/example\.com
+need\_content
+\n stays literal`;
+  const result = await makeFetchResult({ title: "", content });
+  assert.equal(result.content[0].text, content);
+  assert.equal(result.details.content, content);
+  const titled = await makeFetchResult({ title: "Page", content });
+  assert.equal(titled.content[0].text, "Title: Page\n\n" + content);
 });
 
 test("fetch byte limit applies to body, not JSON size or escaping", async () => {

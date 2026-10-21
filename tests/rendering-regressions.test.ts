@@ -20,24 +20,31 @@ const ctx = (overrides: Partial<Context> = {}): Context => ({
   outputPad: 0, ...overrides,
 });
 const options = { expanded: true, isPartial: false };
-const plainLines = (component: Component, width = 80) => component.render(width).map(stripTerminalSequences);
+const plainLines = (component: Component, width = 80) => component.render(width).map(line => stripTerminalSequences(line).trimEnd());
 const resultItem = (i: number, content = "body") => ({
   title: `Article ${i}`, url: `https://example.com/${i}`, rerank_score: 2,
   snippet: `Snippet ${i}`, summary: `Summary ${i}`, content,
   site_name: null, site_icon: null, date: null, authority: 3,
 });
 
-test("long single-line errors are bounded by visual rows, not source newlines", () => {
-  const result = { content: [{ type: "text" as const, text: "HTTP 429: " + "中😀x".repeat(2000) }], details: undefined };
+test("errors use Pi's ten-line fallback preview and expand to the full text", () => {
+  const longLine = { content: [{ type: "text" as const, text: "HTTP 429: " + "中😀x".repeat(2000) }], details: undefined };
   for (const expanded of [false, true]) {
-    const component = renderFetchResult(result, { expanded, isPartial: false }, theme, ctx({ isError: true }));
+    const component = renderFetchResult(longLine, { expanded, isPartial: false }, theme, ctx({ isError: true }));
     for (const width of [1, 8, 24, 40, 80]) {
       const lines = component.render(width);
-      assert(lines.length <= (expanded ? 20 : 3));
       assert(lines.every(line => visibleWidth(line) <= width));
     }
-    assert(plainLines(component).join("\n").includes(expanded ? "Error preview limited" : "error details"));
+    assert.equal(component.render(80).at(-1), "Took 1.2s");
   }
+  const many = { content: [{ type: "text" as const, text: Array.from({ length: 15 }, (_, i) => `error ${i}`).join("\n") }], details: undefined };
+  const folded = plainLines(renderFetchResult(many, { expanded: false, isPartial: false }, theme, ctx({ isError: true }))).join("\n");
+  assert(folded.includes("error 9"));
+  assert(!folded.includes("error 10"));
+  assert(folded.includes("5 more lines"));
+  const expanded = plainLines(renderFetchResult(many, options, theme, ctx({ isError: true }))).join("\n");
+  assert(expanded.includes("error 14"));
+  assert(!expanded.includes("more lines"));
 });
 
 test("expanded search has no result-count cap and hides full JSON paths", async () => {
@@ -89,92 +96,108 @@ test("malformed search structured data cannot leak model text or break rendering
   assert(!output.includes("MODEL TEXT"));
 });
 
-test("long fetch titles cannot hide size, duration or truncation status", async () => {
+test("expanded long fetch titles cannot hide duration or truncation status", async () => {
   const page = { title: "Long title ".repeat(30), content: "x".repeat(60_000) };
   const result = await makeFetchResult(page);
-  const component = renderFetchResult(result, { expanded: false, isPartial: false }, theme, ctx());
+  const component = renderFetchResult(result, options, theme, ctx());
   for (const width of [32, 40, 60]) {
     const lines = plainLines(component, width);
-    assert(lines[0].includes("KiB"));
-    assert(lines[0].includes("1.2s"));
-    assert(lines[1].includes("Content truncated"));
-    assert(lines[2].startsWith("Long title"));
-    assert(!lines.join("\n").includes("example.com"));
+    const output = lines.join("\n");
+    assert.equal(lines[0], "");
+    assert(lines[1].startsWith("Title: Long title"));
+    assert(!lines[1].includes("Took"));
+    assert.equal(lines.at(-1), "Took 1.2s");
+    assert(output.includes("[Truncated: showing"));
+    assert(!output.includes("KiB"));
+    assert(!output.includes("example.com"));
     assert(lines.every(line => visibleWidth(line) <= width));
   }
 });
 
-test("collapsed search reserves domain space even with long titles", async () => {
+test("collapsed search shows source URLs even with long titles", async () => {
   const data: SearchData = { results: [{ ...resultItem(1), title: "LONG ".repeat(200) }] };
   const result = await makeSearchResult(data);
   const component = renderSearchResult(result, { expanded: false, isPartial: false }, theme, ctx());
   for (const width of [24, 40, 60]) {
-    assert(plainLines(component, width).join("\n").includes("example.com"));
+    const output = plainLines(component, width).join("\n");
+    assert(output.includes("example.com"));
+    assert(output.includes("Snippet 1"));
   }
 });
 
-test("UI-only fetch omission leaves model text and raw response complete", async () => {
+test("search expand hint appears only when preview lines are hidden", async () => {
+  const data: SearchData = { results: Array.from({ length: 5 }, (_, i) => resultItem(i + 1)) };
+  const result = await makeSearchResult(data);
+  const folded = plainLines(renderSearchResult(result, { expanded: false, isPartial: false }, theme, ctx())).join("\n");
+  assert(folded.includes("Article 2"));
+  assert(!folded.includes("Article 3"));
+  assert(folded.includes("14 more lines"));
+  const expanded = plainLines(renderSearchResult(result, options, theme, ctx())).join("\n");
+  assert(expanded.includes("Article 5"));
+  assert(!expanded.includes("more lines"));
+});
+
+test("folded fetch previews the body while model text keeps the complete body", async () => {
   const page = { title: "Many lines", content: "line\n".repeat(200) + "LAST BODY MARKER" };
   const result = await makeFetchResult(page);
   assert.equal(result.structuredContent, page);
   assert.equal(result.details.content, page.content);
-  const component = renderFetchResult(result, options, theme, ctx());
-  const shown = plainLines(component, 60).join("\n");
-  assert(!shown.includes("LAST BODY MARKER"));
-  assert(shown.includes("... Preview limited to 40 lines"));
+  const folded = plainLines(renderFetchResult(result, { expanded: false, isPartial: false }, theme, ctx()), 60).join("\n");
+  assert(folded.startsWith("\nTitle: Many lines\n\nline\nline\nline\n"));
+  assert(folded.includes("198 more lines"));
+  assert(!folded.includes("LAST BODY MARKER"));
   assert(result.content[0].text.includes("LAST BODY MARKER"));
-  assert(component.render(60).length <= 46);
-  assert(!shown.includes("Content truncated"));
-  assert(!shown.includes("Full JSON"));
+  const expanded = plainLines(renderFetchResult(result, options, theme, ctx()), 60).join("\n");
+  assert(expanded.includes("LAST BODY MARKER"));
+  assert(!expanded.includes("Content truncated"));
+  assert(!expanded.includes("Full JSON"));
 });
 
-test("search metadata has a serialized byte budget even for 50 escaped UTF-8 titles", () => {
+test("all 50 search items retain complete escaped UTF-8 display fields", () => {
   const data: SearchData = { results: Array.from({ length: 50 }, (_, i) => ({
     ...resultItem(i), title: '😀中"\\'.repeat(500), snippet: '中文"\\'.repeat(500), summary: '中文"\\'.repeat(500), url: 'https://example.com/' + '"\\中'.repeat(500),
   })) };
   const view = buildSearchItems(data);
   assert.equal(view.length, 50);
-  assert(Buffer.byteLength(JSON.stringify(view), "utf8") < 24 * 1024);
+  for (const [index, item] of view.entries()) {
+    assert.equal(item.title, data.results[index].title);
+    assert.equal(item.url, data.results[index].url);
+    assert.equal(item.snippet, data.results[index].snippet);
+  }
   assert(!JSON.stringify(view).includes('"content"'));
 });
 
-test("result components and Markdown instances are reused across expansion and redraw", async () => {
+test("result components are reused across expansion and redraw", async () => {
   const page = { title: "Cache", content: "## A heading\n\nSome **Markdown**." };
   const result = await makeFetchResult(page);
   const first = renderFetchResult(result, options, theme, ctx());
-  plainLines(first);
-  const markdown = Reflect.get(first, "markdown");
-  assert(markdown);
+  const expanded = plainLines(first).join("\n");
+  assert(expanded.includes("A heading"));
+  assert(expanded.includes("Some **Markdown**"));
   const second = renderFetchResult(result, options, theme, ctx({ lastComponent: first }));
   assert.equal(first, second);
-  plainLines(second);
-  assert.equal(Reflect.get(second, "markdown"), markdown);
   renderFetchResult(result, { expanded: false, isPartial: false }, theme, ctx({ lastComponent: second }));
-  const expanded = renderFetchResult(result, options, theme, ctx({ lastComponent: second }));
-  assert.equal(expanded, first);
-  plainLines(expanded);
-  assert.equal(Reflect.get(expanded, "markdown"), markdown);
+  const reused = renderFetchResult(result, options, theme, ctx({ lastComponent: second }));
+  assert.equal(reused, first);
   first.invalidate();
-  plainLines(first);
-  assert.equal(Reflect.get(first, "markdown"), markdown);
+  assert(plainLines(first).join("\n").includes("A heading"));
 });
 
-test("new content or theme invalidates cached Markdown without replacing the result component", async () => {
+test("new content or theme refreshes displayed text without replacing the result component", async () => {
   const page = { title: "Cache", content: "Old content" };
   const firstResult = await makeFetchResult(page);
   const component = renderFetchResult(firstResult, options, theme, ctx());
-  plainLines(component);
-  const oldMarkdown = Reflect.get(component, "markdown");
+  assert(plainLines(component).join("\n").includes("Old content"));
   const next = await makeFetchResult({ ...page, content: "New content" });
   const same = renderFetchResult(next, options, theme, ctx({ lastComponent: component }));
   assert.equal(same, component);
-  assert(plainLines(same).join("\n").includes("New content"));
-  assert.notEqual(Reflect.get(same, "markdown"), oldMarkdown);
-  const currentMarkdown = Reflect.get(same, "markdown");
-  const otherTheme = { ...theme, fg: (_color: string, text: string) => text } as Theme;
-  const changed = renderFetchResult(next, options, otherTheme, ctx({ lastComponent: same }));
-  plainLines(changed);
-  assert.notEqual(Reflect.get(changed, "markdown"), currentMarkdown);
+  const text = plainLines(same).join("\n");
+  assert(text.includes("New content"));
+  assert(!text.includes("Old content"));
+  const styledTheme = { ...theme, fg: (color: string, value: string) => color === "toolOutput" ? `<${value}>` : value } as Theme;
+  const changed = renderFetchResult(next, options, styledTheme, ctx({ lastComponent: same }));
+  assert.equal(changed, component);
+  assert(changed.render(100).join("\n").includes("<Title: Cache>"));
 });
 
 test("call components are reused and display updated arguments", () => {

@@ -16,7 +16,7 @@ const sample: SearchData = { results: [{
 
 function collectTools() {
   const tools: ToolDefinition[] = [];
-  extension({ registerTool: (tool: ToolDefinition) => { tools.push(tool); } } as unknown as ExtensionAPI);
+  extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => { tools.push(tool); } } as unknown as ExtensionAPI);
   return tools;
 }
 
