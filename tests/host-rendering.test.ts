@@ -3,7 +3,7 @@ import test from "node:test";
 import { initTheme, type AgentToolResult, type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { ToolExecutionComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
-import extension from "../extensions/index.ts";
+import extension from "../index.ts";
 import { makeFetchResult, makeSearchResult } from "./helpers.ts";
 
 initTheme("dark", false);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import extension from "../extensions/index.ts";
+import extension from "../index.ts";
 import { request } from "../src/client.ts";
 import { trackResult } from "./helpers.ts";
 

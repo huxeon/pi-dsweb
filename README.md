@@ -18,7 +18,7 @@
 以下命令在项目根目录执行。如果已经在 Pi 中配置了 `deepseek` 提供商，例如通过 `/login` 保存 API Key，可以直接加载扩展：
 
 ```powershell
-pi -e ./extensions/index.ts
+pi -e ./index.ts
 ```
 
 也可以在启动 Pi 前显式指定或覆盖密钥：
@@ -26,13 +26,13 @@ pi -e ./extensions/index.ts
 ```powershell
 # PowerShell
 $env:DEEPSEEK_API_KEY = "sk-你的密钥"
-pi -e ./extensions/index.ts
+pi -e ./index.ts
 ```
 
 ```bash
 # Linux / macOS
 export DEEPSEEK_API_KEY="sk-your-key"
-pi -e ./extensions/index.ts
+pi -e ./index.ts
 ```
 
 要持久安装为 Pi package，可选择用户级或项目级安装：
@@ -258,9 +258,9 @@ npm pack --dry-run
 
 ```text
 pi-dsweb/
-├── extensions/
-│   └── index.ts           # 注册工具和生命周期处理
+├── index.ts               # 对外加载入口，转导出 src/index.ts
 ├── src/
+│   ├── index.ts           # 注册工具和生命周期处理
 │   ├── client.ts          # 参数校验、HTTP、超时、取消、重试
 │   ├── schemas.ts         # TypeBox 请求/响应 schema
 │   ├── output.ts          # 模型文本、结构化结果、截断和临时文件

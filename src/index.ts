@@ -1,13 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
-import { request } from "../src/client.ts";
-import { makeFetchResult, makeSearchResult } from "../src/output.ts";
-import { clearToolTimers } from "../src/timing.ts";
-import { renderSearchCall, renderSearchResult, renderFetchCall, renderFetchResult } from "../src/renderers.ts";
+import { request } from "./client.ts";
+import { makeFetchResult, makeSearchResult } from "./output.ts";
+import { clearToolTimers } from "./timing.ts";
+import { renderSearchCall, renderSearchResult, renderFetchCall, renderFetchResult } from "./renderers.ts";
 import {
   FetchParams, FetchResponse, SearchParams, SearchResponse,
   type FetchData, type SearchData,
-} from "../src/schemas.ts";
+} from "./schemas.ts";
 
 const annotations = {
   readOnlyHint: true,
