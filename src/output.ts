@@ -1,9 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { truncateHead, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { formatSize, truncateHead, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { FetchData, SearchData } from "./schemas.ts";
-import { buildSearchItems, displayLine, formatFetchLines, type FetchDetails } from "./presentation.ts";
+import { buildSearchItems, displayLine, FETCH_MAX_BYTES, FETCH_MAX_LINES, formatFetchLines, type FetchDetails } from "./presentation.ts";
 
 /** Headings and metadata are single-line fields: collapsed whitespace keeps an
  * embedded newline from injecting extra Markdown structure into model text.
@@ -56,38 +57,64 @@ export async function makeSearchResult(response: SearchData, signal?: AbortSigna
   }
 }
 
+/** Keep complete lines where possible, but retain a UTF-8-safe first-line prefix. */
+function fetchPreview(body: string) {
+  const truncation = truncateHead(body, { maxBytes: FETCH_MAX_BYTES, maxLines: FETCH_MAX_LINES });
+  const content = truncation.firstLineExceedsLimit
+    ? new TextDecoder().decode(Buffer.from(body, "utf8").subarray(0, FETCH_MAX_BYTES), { stream: true })
+    : truncation.content;
+  return { truncation, content };
+}
+
 /** Fetch exposes the raw response to codemode; only the displayed body is bounded. */
 export async function makeFetchResult(response: FetchData, signal?: AbortSignal) {
   signal?.throwIfAborted();
-  const preview = truncateHead(response.content, { maxBytes: 48 * 1024, maxLines: 1900 });
-  let content = formatFetch({ title: response.title, content: preview.content });
-  let directory: string | undefined;
+  const { truncation: preview, content: excerpt } = fetchPreview(response.content);
+  let content = formatFetch({ title: response.title, content: excerpt });
+  let path: string | undefined;
+  let owned = false;
   try {
     if (preview.truncated) {
-      directory = await mkdtemp(join(tmpdir(), "pi-dsweb-fetch-"));
-      const path = join(directory, "content.md");
+      path = join(tmpdir(), `pi-dsweb-fetch-${randomBytes(8).toString("hex")}.md`);
       await withFileMutationQueue(path, async () => {
         signal?.throwIfAborted();
-        await writeFile(path, response.content, { encoding: "utf8", mode: 0o600, signal });
+        const file = await open(path!, "wx", 0o600);
+        owned = true;
+        try {
+          await file.writeFile(response.content, { encoding: "utf8", signal });
+        } finally {
+          await file.close();
+        }
       });
-      content += `\n\n[Content truncated. Complete page content saved as Markdown: ${path}. Use the read tool to inspect it.]`;
+      if (preview.firstLineExceedsLimit) {
+        const firstLine = response.content.split("\n", 1)[0];
+        content += `\n\n[Showing first ${formatSize(Buffer.byteLength(excerpt))} of line 1 (line is ${formatSize(Buffer.byteLength(firstLine))}). Full output: ${path}]`;
+      } else {
+        const limit = preview.truncatedBy === "bytes" ? ` (${formatSize(FETCH_MAX_BYTES)} limit)` : "";
+        content += `\n\n[Showing lines 1-${preview.outputLines} of ${preview.totalLines}${limit}. Full output: ${path}]`;
+      }
     }
     signal?.throwIfAborted();
-    const details: FetchDetails = {
+    const base = {
       title: displayLine(response.title),
-      bytes: Buffer.byteLength(response.content, "utf8"),
-      content: preview.content,
-      truncated: preview.truncated,
+      content: excerpt,
       totalLines: preview.totalLines,
-      outputLines: preview.outputLines,
+      outputLines: preview.firstLineExceedsLimit ? 1 : preview.outputLines,
     };
+    let details: FetchDetails;
+    if (preview.truncated) {
+      if (!path || !preview.truncatedBy) throw new Error("Missing fetch truncation details.");
+      details = { ...base, truncated: true, truncatedBy: preview.truncatedBy, fullOutputPath: path };
+    } else {
+      details = { ...base, truncated: false };
+    }
     return {
       content: [{ type: "text" as const, text: content }],
       structuredContent: response,
       details,
     };
   } catch (error) {
-    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
+    if (owned && path) await rm(path, { force: true }).catch(() => {});
     signal?.throwIfAborted();
     throw error;
   }

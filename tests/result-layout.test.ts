@@ -31,7 +31,7 @@ test("Search details retain complete titles/URLs/snippets without duplicating su
   const data = { results: [item] };
   const original = structuredClone(data);
   const details = buildSearchItems(data);
-  assert.deepEqual(details, [{ title, url, snippet, domain: "source.example" }]);
+  assert.deepEqual(details, [{ title, url, snippet }]);
   assert(!JSON.stringify(details).includes("MODEL LONG SUMMARY"));
   assert.deepEqual(data, original);
 });
@@ -80,7 +80,8 @@ test("Fetch retains its full title and expands the complete model-visible body",
   const result = await makeFetchResult(page);
   assert.equal(result.details.title, title);
   const folded = renderFetchResult(result, foldedOptions, theme, context());
-  assert(compactText(folded).includes(title));
+  assert(compactText(folded).includes(title.slice(0, 20)));
+  assert(!compactText(folded).includes("TITLE_END"));
   assert(!compactText(folded).includes("MODEL_BODY_END"));
   assert(compactText(folded).includes("morelines"));
   const expanded = renderFetchResult(result, expandedOptions, theme, context({ lastComponent: folded }));
@@ -132,8 +133,8 @@ test("Pi host expansion exposes complete Search result fields and Fetch titles f
   const searchHost = new ToolExecutionComponent("web_search", "host-search-layout", { query: "q" }, {},
     { renderCall: renderSearchCall as NonNullable<ToolDefinition["renderCall"]>, renderResult: renderSearchResult }, ui, process.cwd());
   searchHost.updateResult({ ...search, isError: false });
-  assert(compactText(searchHost).includes(title));
-  assert(compactText(searchHost).includes(url));
+  assert(compactText(searchHost).includes(title.slice(0, 20)));
+  assert(!compactText(searchHost).includes("TITLE_END"));
   searchHost.setExpanded(true);
   const text = compactText(searchHost);
   assert(text.includes(title));
@@ -142,7 +143,8 @@ test("Pi host expansion exposes complete Search result fields and Fetch titles f
   const fetchHost = new ToolExecutionComponent("web_fetch", "host-fetch-layout", { url: "https://example.org/page" }, {},
     { renderCall: renderFetchCall as NonNullable<ToolDefinition["renderCall"]>, renderResult: renderFetchResult }, ui, process.cwd());
   fetchHost.updateResult({ ...fetched, isError: false });
-  assert(compactText(fetchHost).includes(title));
+  assert(compactText(fetchHost).includes(title.slice(0, 20)));
+  assert(!compactText(fetchHost).includes("TITLE_END"));
   assert(compactText(fetchHost).includes("https://example.org/page"));
   fetchHost.setExpanded(true);
   assert(compactText(fetchHost).includes(title));

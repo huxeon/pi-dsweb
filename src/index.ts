@@ -55,7 +55,7 @@ export default function deepseekWeb(pi: ExtensionAPI) {
     renderCall: renderFetchCall,
     renderResult: renderFetchResult,
     promptSnippet: "Fetch a known web page and read its title and Markdown content.",
-    description: "Retrieve a single HTTP(S) web page and return its title and Markdown body. Use for a known URL or to read search results in full. URLs must have a host and no username/password. Website access policies may prevent retrieval. The text includes title and body without repeating the URL. Bodies over about 48 KiB / 1900 lines are truncated and saved in full as a local Markdown file for the read tool. Codemode returns the complete original response without truncation.",
+    description: "Retrieve a single HTTP(S) web page and return its title and Markdown body. Use for a known URL or to read search results in full. URLs must have a host and no username/password. Website access policies may prevent retrieval. The text includes title and body without repeating the URL. Bodies over 50 KiB / 2000 lines are truncated and saved in full as a local Markdown file for the read tool. Codemode returns the complete original response without truncation.",
     parameters: FetchParams,
     outputSchema: FetchResponse,
     annotations,

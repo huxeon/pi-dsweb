@@ -27,7 +27,7 @@ const resultItem = (i: number, content = "body") => ({
   site_name: null, site_icon: null, date: null, authority: 3,
 });
 
-test("errors use Pi's ten-line fallback preview and expand to the full text", () => {
+test("errors preview five visual rows and expand to the full text", () => {
   const longLine = { content: [{ type: "text" as const, text: "HTTP 429: " + "中😀x".repeat(2000) }], details: undefined };
   for (const expanded of [false, true]) {
     const component = renderFetchResult(longLine, { expanded, isPartial: false }, theme, ctx({ isError: true }));
@@ -39,12 +39,21 @@ test("errors use Pi's ten-line fallback preview and expand to the full text", ()
   }
   const many = { content: [{ type: "text" as const, text: Array.from({ length: 15 }, (_, i) => `error ${i}`).join("\n") }], details: undefined };
   const folded = plainLines(renderFetchResult(many, { expanded: false, isPartial: false }, theme, ctx({ isError: true }))).join("\n");
-  assert(folded.includes("error 9"));
-  assert(!folded.includes("error 10"));
-  assert(folded.includes("5 more lines"));
+  assert(folded.includes("error 4"));
+  assert(!folded.includes("error 5"));
+  assert(folded.includes("10 more lines"));
   const expanded = plainLines(renderFetchResult(many, options, theme, ctx({ isError: true }))).join("\n");
   assert(expanded.includes("error 14"));
   assert(!expanded.includes("more lines"));
+  for (const renderer of [renderSearchResult, renderFetchResult]) {
+    const component = renderer(longLine, { expanded: false, isPartial: false }, theme, ctx({ isError: true }));
+    for (const width of [24, 40, 80, 32]) {
+      const lines = plainLines(component, width);
+      const hint = lines.findIndex(line => line.includes("more lines"));
+      assert.equal(hint, 5);
+      assert.equal(lines.at(-1), "Took 1.2s");
+    }
+  }
 });
 
 test("expanded search has no result-count cap and hides full JSON paths", async () => {
@@ -107,22 +116,28 @@ test("expanded long fetch titles cannot hide duration or truncation status", asy
     assert(lines[1].startsWith("Title: Long title"));
     assert(!lines[1].includes("Took"));
     assert.equal(lines.at(-1), "Took 1.2s");
-    assert(output.includes("[Truncated: showing"));
+    assert(output.includes("Truncated:"));
     assert(!output.includes("KiB"));
     assert(!output.includes("example.com"));
     assert(lines.every(line => visibleWidth(line) <= width));
   }
 });
 
-test("collapsed search shows source URLs even with long titles", async () => {
+test("collapsed search bounds long titles by visual rows and expands remaining fields", async () => {
   const data: SearchData = { results: [{ ...resultItem(1), title: "LONG ".repeat(200) }] };
   const result = await makeSearchResult(data);
   const component = renderSearchResult(result, { expanded: false, isPartial: false }, theme, ctx());
   for (const width of [24, 40, 60]) {
-    const output = plainLines(component, width).join("\n");
-    assert(output.includes("example.com"));
-    assert(output.includes("Snippet 1"));
+    const lines = plainLines(component, width);
+    const output = lines.join("\n");
+    assert(output.includes("more lines"));
+    assert(!output.includes("example.com"));
+    assert(lines.filter(line => line.includes("LONG")).length <= 5);
   }
+  const expanded = renderSearchResult(result, options, theme, ctx({ lastComponent: component }));
+  const output = plainLines(expanded, 80).join("\n");
+  assert(output.includes("example.com"));
+  assert(output.includes("Snippet 1"));
 });
 
 test("search expand hint appears only when preview lines are hidden", async () => {

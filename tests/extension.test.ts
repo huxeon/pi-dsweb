@@ -76,8 +76,8 @@ test("large fetch bodies are bounded in text, saved as Markdown, and raw in code
   assert(file);
   assert.equal(result.details.truncated, true);
   assert.equal(result.structuredContent, page);
-  assert(Buffer.byteLength(result.details.content) <= 48 * 1024);
-  assert(Buffer.byteLength(result.content[0].text) < 50 * 1024);
+  assert(Buffer.byteLength(result.details.content) <= 50 * 1024);
+  assert(result.content[0].text.includes("Showing first"));
   assert.equal(await readFile(file, "utf8"), page.content);
   assert(Value.Check(FetchResponse, result.structuredContent));
   assert.deepEqual(collectTools()[1].outputSchema, FetchResponse);
@@ -87,7 +87,8 @@ test("many body lines trigger fetch truncation even below byte limit", async () 
   const page = { title: "Lines", content: "x\n".repeat(2100) };
   const result = await makeFetchResult(page);
   assert.equal(result.details.truncated, true);
-  assert(result.content[0].text.split("\n").length <= 2000);
+  assert.equal(result.details.outputLines, 2000);
+  assert(result.content[0].text.includes("Showing lines 1-2000 of 2100"));
   assert.equal(result.structuredContent, page);
 });
 

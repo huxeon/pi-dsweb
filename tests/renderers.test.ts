@@ -116,7 +116,7 @@ test("malformed search details fail closed without throwing or leaking model tex
   const valid = buildSearchItems(data)[0];
   const malformed: unknown[] = [
     undefined, null, {}, [null], [123], [[]], [{}], new Array(1),
-    ...["title", "domain", "url", "snippet"].flatMap(field => [
+    ...["title", "url", "snippet"].flatMap(field => [
       [{ ...valid, [field]: null }],
       [{ ...valid, [field]: 123 }],
     ]),
@@ -140,6 +140,25 @@ test("fetch does not fall back to model text for obsolete details", () => {
   assert(!output.includes("Legacy response text"));
 });
 
+test("fetch rejects inconsistent truncation details without exposing model text", () => {
+  const base = { title: "Page", content: "body", totalLines: 2, outputLines: 1 };
+  const invalid = [
+    { ...base, truncated: true },
+    { ...base, truncated: true, truncatedBy: "lines" },
+    { ...base, truncated: true, truncatedBy: "bytes", fullOutputPath: "" },
+    { ...base, truncated: true, truncatedBy: "invalid", fullOutputPath: "file.md" },
+    { ...base, truncated: false, truncatedBy: "lines", fullOutputPath: "file.md" },
+  ];
+  for (const details of invalid) {
+    const result = { content: [{ type: "text" as const, text: "PRIVATE MODEL TEXT" }], details };
+    for (const expanded of [false, true]) {
+      const output = text(renderFetchResult(result, { expanded, isPartial: false }, theme, context()));
+      assert(output.includes("Page preview unavailable"));
+      assert(!output.includes("PRIVATE MODEL TEXT"));
+    }
+  }
+});
+
 test("folded fetch previews five lines; expansion shows the model-visible body and warning", async () => {
   const page = { title: "Large page", content: Array.from({ length: 2100 }, (_, i) => `Line ${i}`).join("\n") };
   const result = await makeFetchResult(page);
@@ -147,16 +166,17 @@ test("folded fetch previews five lines; expansion shows the model-visible body a
   const collapsed = text(renderFetchResult(result, { expanded: false, isPartial: false }, theme, context()));
   assert(collapsed.startsWith("\nTitle: Large page\n\nLine 0\nLine 1\nLine 2\n"));
   assert(!collapsed.includes("\nLine 3\n"));
-  assert(collapsed.includes("1897 more lines"));
-  assert(collapsed.includes("[Truncated: showing 1900 of 2100 lines]"));
+  assert(collapsed.includes("1997 more lines"));
+  assert(collapsed.includes("Full output:"));
+  assert(collapsed.replace(/\s/g, "").includes("Truncated:showing2000of2100lines]"));
   const output = text(renderFetchResult(result, { expanded: true, isPartial: false }, theme, context()), 60);
   assert(output.includes("Line 1880"));
   assert(!output.includes("Line 2099"));
   assert(result.content[0].text.includes("Line 1880"));
-  assert(output.includes("[Truncated: showing 1900 of 2100 lines]"));
+  assert(output.replace(/\s/g, "").includes("Truncated:showing2000of2100lines]"));
+  assert(output.includes("Full output:"));
   assert(!output.includes("Preview limited"));
   assert(!output.includes("Full JSON"));
-  assert(!output.includes("content.md"));
 });
 
 test("display sanitization does not modify model/codemode response data", async () => {
@@ -178,7 +198,7 @@ test("search details contain display fields without long summaries or page bodie
   const items = buildSearchItems(data);
   assert.equal(items.length, 5);
   assert.equal(items[0].snippet, "Short summary");
-  assert.deepEqual(Object.keys(items[0]), ["title", "domain", "url", "snippet"]);
+  assert.deepEqual(Object.keys(items[0]), ["title", "url", "snippet"]);
   assert(!JSON.stringify(items).includes("Long summary"));
   assert(!JSON.stringify(items).includes("Body"));
 });
@@ -206,7 +226,7 @@ test("UI uses snippets only while model text uses summaries only", () => {
   assert.deepEqual(sample, original);
 });
 
-test("both tools preview exactly five logical lines and preserve that prefix on expansion", async () => {
+test("both tools preview five visual rows and preserve that prefix on expansion", async () => {
   for (const length of [5, 6]) {
     const body = Array.from({ length: length }, (_, i) => `body ${i}`).join("\n");
     const fetch = await makeFetchResult({ title: "", content: body });

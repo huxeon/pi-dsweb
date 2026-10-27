@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -30,7 +30,7 @@ test("small fetch text contains title/body, with raw codemode output and flat UI
   assert.equal(result.content[0].text, "Title: Page title\n\n## Heading\n\n正文 😀");
   assert.equal(result.structuredContent, page);
   assert.deepEqual(result.details, {
-    title: page.title, bytes: Buffer.byteLength(page.content), content: page.content, truncated: false,
+    title: page.title, content: page.content, truncated: false,
     totalLines: 3, outputLines: 3,
   });
   assert.deepEqual(page, original);
@@ -51,7 +51,7 @@ test("empty fetch omits the title and preserves the empty body without files", a
   const result = await makeFetchResult(page);
   assert.equal(result.content[0].text, "");
   assert.equal(result.structuredContent, page);
-  assert.deepEqual(result.details, { title: "", bytes: 0, content: "", truncated: false, totalLines: 0, outputLines: 0 });
+  assert.deepEqual(result.details, { title: "", content: "", truncated: false, totalLines: 0, outputLines: 0 });
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -69,7 +69,7 @@ need\_content
 });
 
 test("fetch byte limit applies to body, not JSON size or escaping", async () => {
-  const exact = { title: "Page", content: "x".repeat(48 * 1024) };
+  const exact = { title: "Page", content: "x".repeat(50 * 1024) };
   const small = await makeFetchResult(exact);
   assert.equal(small.details.truncated, false);
   assert.equal(small.details.content, exact.content);
@@ -77,7 +77,7 @@ test("fetch byte limit applies to body, not JSON size or escaping", async () => 
   const oversized = { ...exact, content: exact.content + "x" };
   const large = await makeFetchResult(oversized);
   assert.equal(large.details.truncated, true);
-  assert(Buffer.byteLength(large.details.content) <= 48 * 1024);
+  assert(Buffer.byteLength(large.details.content) <= 50 * 1024);
   assert.equal(large.structuredContent, oversized);
   const escaped = { title: "Page", content: '"\\'.repeat(15_000), extra: "x".repeat(100_000) };
   const raw = await makeFetchResult(escaped);
@@ -86,8 +86,28 @@ test("fetch byte limit applies to body, not JSON size or escaping", async () => 
   assert.deepEqual(fetchBodyPaths(raw), []);
 });
 
-test("fetch line limit preserves 1900 lines and truncates longer bodies only once", async () => {
-  const exact = { title: "Page", content: Array.from({ length: 1900 }, (_, i) => `Line ${i}`).join("\n") };
+test("oversized first line retains a UTF-8 safe prefix and reports a partial line", async () => {
+  const page = { title: "Title", content: "😀".repeat(15000) + "\nNEXT" };
+  const result = await makeFetchResult(page);
+  assert.equal(Buffer.byteLength(result.details.content), 50 * 1024);
+  assert(!result.details.content.includes("�"));
+  assert.equal(result.details.outputLines, 1);
+  assert(result.content[0].text.includes("[Showing first 50.0KB of line 1 (line is 58.6KB). Full output:"));
+  assert.equal(await readFile(fetchBodyPaths(result)[0], "utf8"), page.content);
+  const uneven = await makeFetchResult({ title: "", content: "中".repeat(20000) });
+  assert.equal(Buffer.byteLength(uneven.details.content), 51198);
+  assert(!uneven.details.content.includes("�"));
+});
+
+test("byte limit after complete lines reports the actual line range", async () => {
+  const result = await makeFetchResult({ title: "Page", content: "short\n" + "x".repeat(50 * 1024) });
+  assert.equal(result.details.content, "short");
+  assert.equal(result.details.truncatedBy, "bytes");
+  assert(result.content[0].text.includes("[Showing lines 1-1 of 2 (50.0KB limit). Full output:"));
+});
+
+test("fetch line limit preserves 2000 lines and truncates longer bodies only once", async () => {
+  const exact = { title: "Page", content: Array.from({ length: 2000 }, (_, i) => `Line ${i}`).join("\n") };
   const result = await makeFetchResult(exact);
   assert.equal(result.details.truncated, false);
   assert.equal(result.details.content, exact.content);
@@ -106,7 +126,7 @@ test("truncated fetch saves the exact complete UTF-8 body as private Markdown", 
   const result = await makeFetchResult(page);
   const paths = fetchBodyPaths(result);
   assert.equal(paths.length, 1);
-  assert(paths[0].endsWith("content.md"));
+  assert(/pi-dsweb-fetch-[0-9a-f]{16}\.md$/.test(paths[0]));
   assert.equal(await readFile(paths[0], "utf8"), page.content);
   if (process.platform !== "win32") assert.equal((await stat(paths[0])).mode & 0o777, 0o600);
   assert(page.content.startsWith(result.details.content));
@@ -114,8 +134,8 @@ test("truncated fetch saves the exact complete UTF-8 body as private Markdown", 
   assert(!result.details.content.includes("COMPLETE END"));
   assert(result.content[0].text.includes(result.details.content));
   assert(!result.content[0].text.includes("COMPLETE END"));
-  assert(!JSON.stringify(result.details).includes(paths[0]));
-  assert.equal(result.details.bytes, Buffer.byteLength(page.content));
+  assert.equal(result.details.fullOutputPath, paths[0]);
+  assert(result.content[0].text.includes(`Full output: ${paths[0]}]`));
   assert.equal(result.structuredContent, page);
   assert.deepEqual(page, original);
 });
@@ -136,6 +156,30 @@ test("cancelled fetch output leaves no temporary files, including cancellation a
   });
   await assert.rejects(makeFetchResult(page, controller.signal), { name: "AbortError" });
   assert(checks >= 3);
+  assert.deepEqual(await readdir(root), []);
+});
+
+test("fetch removes its single temp file when a write fails or is cancelled", async (t) => {
+  const root = await isolatedTemp(t);
+  const probePath = join(root, "probe");
+  const probe = await open(probePath, "wx");
+  const prototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  await rm(probePath);
+  const mocked = t.mock.method(prototype, "writeFile", async function (this: typeof probe) {
+    await this.write("partial");
+    throw new Error("simulated write failure");
+  });
+  const page = { title: "Large", content: "x".repeat(60_000) };
+  await assert.rejects(makeFetchResult(page), /simulated write failure/);
+  assert.deepEqual(await readdir(root), []);
+  const controller = new AbortController();
+  mocked.mock.mockImplementation(async function (this: typeof probe) {
+    await this.write("partial");
+    controller.abort();
+    throw new Error("interrupted write");
+  });
+  await assert.rejects(makeFetchResult(page, controller.signal), { name: "AbortError" });
   assert.deepEqual(await readdir(root), []);
 });
 

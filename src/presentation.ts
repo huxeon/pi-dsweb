@@ -1,9 +1,11 @@
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { SearchData } from "./schemas.ts";
 
+export const FETCH_MAX_LINES = 2000;
+export const FETCH_MAX_BYTES = 50 * 1024;
+
 export interface SearchItemView {
   title: string;
-  domain: string;
   url: string;
   snippet: string;
 }
@@ -11,14 +13,15 @@ export interface SearchItemView {
 /** Fetch UI receives the same body excerpt as the model, without wrappers.
  * Line counts mirror Pi's truncation details for the warning footer.
  */
-export interface FetchDetails {
+export type FetchDetails = {
   title: string;
-  bytes: number;
   content: string;
-  truncated: boolean;
   totalLines: number;
   outputLines: number;
-}
+} & (
+  | { truncated: false; truncatedBy?: never; fullOutputPath?: never }
+  | { truncated: true; truncatedBy: "lines" | "bytes"; fullOutputPath: string }
+);
 
 /** Display-only sanitization; preserve Markdown line breaks and tabs. */
 export function safeText(text: string): string {
@@ -38,23 +41,9 @@ export function formatFetchLines(title: string, bodyLines: readonly string[]): s
   return [...(heading ? [`Title: ${heading}`, ""] : []), ...bodyLines];
 }
 
-export function singleLine(text: string, limit = 240): string {
-  const clean = displayLine(text);
-  const chars = [...clean];
-  return chars.length > limit ? chars.slice(0, limit).join("") + "..." : clean;
-}
-
-export function domainOf(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return /^https?:$/.test(parsed.protocol) ? displayLine(parsed.hostname) : "unknown source";
-  } catch { return "unknown source"; }
-}
-
 export function buildSearchItems(response: SearchData): SearchItemView[] {
   return response.results.map(item => ({
     title: displayLine(item.title || "Untitled result"),
-    domain: domainOf(item.url),
     url: displayLine(item.url),
     // Short snippets are intended for UI; long summaries are for models.
     snippet: safeText(item.snippet),

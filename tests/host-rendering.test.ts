@@ -28,7 +28,7 @@ test("Pi's actual tool component displays search results without forwarding stru
   })) });
   assert(Array.isArray(result.details));
   assert.equal(result.details.length, 2);
-  assert.deepEqual(Object.keys(result.details[0]), ["title", "domain", "url", "snippet"]);
+  assert.deepEqual(Object.keys(result.details[0]), ["title", "url", "snippet"]);
   component.updateResult({ ...result, isError: false, durationMs: 1200 });
   const output = () => component.render(100).map(stripTerminalSequences).join("\n");
   const collapsed = output();
@@ -44,6 +44,72 @@ test("Pi's actual tool component displays search results without forwarding stru
   assert.equal(received.structuredContent, undefined);
   assert.deepEqual(Object.keys(received).sort(), ["content", "details"]);
   assert.equal(received.details, result.details);
+});
+
+test("Search bounds long URLs by visual rows and recalculates on resize", async () => {
+  const tools: ToolDefinition[] = [];
+  extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
+  const search = tools.find(tool => tool.name === "web_search")!;
+  const url = "https://example.com/" + "path/".repeat(200) + "URL_END";
+  const result = await makeSearchResult({ results: [{
+    title: "Title", url, rerank_score: 2, snippet: "Snippet", summary: "Summary", content: "",
+    site_name: null, site_icon: null, date: null, authority: 3,
+  }] });
+  const component = new ToolExecutionComponent("web_search", "search-visual", { query: "test" }, {},
+    search, { requestRender() {} } as unknown as TUI, process.cwd());
+  component.updateResult({ ...result, isError: false });
+  for (const width of [40, 100, 32, 80]) {
+    const rows = component.render(width).map(stripTerminalSequences);
+    const output = rows.join("\n");
+    assert(output.includes("more lines"));
+    assert(!output.includes("URL_END"));
+    assert(!output.includes("Snippet"));
+    assert(rows.filter(row => row.includes("path/")).length <= 5);
+  }
+  component.setExpanded(true);
+  const expanded = component.render(80).map(stripTerminalSequences).join("").replace(/\s/g, "");
+  assert(expanded.includes(url));
+  assert(expanded.includes("Snippet"));
+});
+
+test("Fetch bounds a long first line by visual rows and retains the warning on resize and expansion", async () => {
+  const tools: ToolDefinition[] = [];
+  extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
+  const fetch = tools.find(tool => tool.name === "web_fetch")!;
+  const result = await makeFetchResult({ title: "Page", content: "x".repeat(60_000) });
+  const component = new ToolExecutionComponent("web_fetch", "visual-preview", { url: "https://example.com" }, {},
+    fetch, { requestRender() {} } as unknown as TUI, process.cwd());
+  component.updateResult({ ...result, isError: false, durationMs: 1200 });
+  for (const width of [40, 100, 32, 80]) {
+    const rows = component.render(width).map(stripTerminalSequences);
+    const compact = rows.join("").replace(/\s/g, "");
+    assert(compact.includes(result.details.fullOutputPath!.replace(/\s/g, "")));
+    assert(compact.includes("Truncated:1linesshown(50.0KBlimit)"));
+    assert(compact.includes("morelines"));
+    assert(rows.filter(row => /^x+$/.test(row.trim())).length <= 5);
+  }
+  component.setExpanded(true);
+  const expanded = component.render(80).map(stripTerminalSequences).join("").replace(/\s/g, "");
+  assert(expanded.includes("x".repeat(50 * 1024)));
+  assert(expanded.includes(result.details.fullOutputPath!.replace(/\s/g, "")));
+  assert(expanded.includes("Truncated:1linesshown(50.0KBlimit)"));
+});
+
+test("Fetch shows byte-limit warnings for complete-line excerpts in both UI states", async () => {
+  const tools: ToolDefinition[] = [];
+  extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
+  const fetch = tools.find(tool => tool.name === "web_fetch")!;
+  const result = await makeFetchResult({ title: "Page", content: "first\n" + "x".repeat(50 * 1024) });
+  const component = new ToolExecutionComponent("web_fetch", "byte-preview", { url: "https://example.com" }, {},
+    fetch, { requestRender() {} } as unknown as TUI, process.cwd());
+  component.updateResult({ ...result, isError: false });
+  for (const expanded of [false, true]) {
+    component.setExpanded(expanded);
+    const text = component.render(32).map(stripTerminalSequences).join("").replace(/\s/g, "");
+    assert(text.includes(result.details.fullOutputPath!.replace(/\s/g, "")));
+    assert(text.includes("Truncated:1linesshown(50.0KBlimit)"));
+    assert(text.includes("first"));
+  }
 });
 
 test("Pi's Fetch component previews five lines and expands the body", async () => {
@@ -67,7 +133,7 @@ test("Pi's Fetch component previews five lines and expands the body", async () =
     assert(collapsed.includes("Body line 2"));
     assert(!collapsed.includes("Body line 3"));
     assert(collapsed.includes("more lines"));
-    assert.equal(collapsed.includes("[Truncated:"), result.details.truncated);
+    assert.equal(collapsed.includes("Truncated:"), result.details.truncated);
     assert(collapsed.includes("Took 1.2s"));
     component.setExpanded(true);
     const expanded = output();
@@ -84,9 +150,10 @@ test("Pi's Fetch component previews five lines and expands the body", async () =
     assert.equal(expanded.split("https://example.com/article").length - 1, 1);
     assert(!expanded.includes("Preview limited"));
     assert(!expanded.includes("Full JSON"));
-    assert(!expanded.includes("content.md"));
     if (result.details.truncated) {
-      assert(expanded.includes(`[Truncated: showing ${result.details.outputLines} of ${result.details.totalLines} lines]`));
+      const compact = expanded.replace(/\s/g, "");
+      assert(compact.includes(`Truncated:showing${result.details.outputLines}of${result.details.totalLines}lines]`));
+      assert(compact.includes(result.details.fullOutputPath!.replace(/\s/g, "")));
       assert(expanded.includes("Body line 1880"));
       assert(!expanded.includes("FINAL BODY MARKER"));
       assert(result.content[0].text.includes("Body line 1880"));
@@ -96,7 +163,7 @@ test("Pi's Fetch component previews five lines and expands the body", async () =
       assert(!expanded.includes("Truncated"));
     }
     assert.equal(result.structuredContent, response);
-    assert.deepEqual(Object.keys(result.details),
-      ["title", "bytes", "content", "truncated", "totalLines", "outputLines"]);
+    if (!result.details.truncated) assert.deepEqual(Object.keys(result.details),
+      ["title", "content", "totalLines", "outputLines", "truncated"]);
   }
 });
