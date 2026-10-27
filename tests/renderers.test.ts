@@ -133,21 +133,14 @@ test("malformed search details fail closed without throwing or leaking model tex
   }
 });
 
-test("fetch does not fall back to model text for obsolete details", () => {
-  const result = { content: [{ type: "text" as const, text: "Legacy response text" }], details: { truncated: false } };
-  const output = text(renderFetchResult(result, { expanded: true, isPartial: false }, theme, context()));
-  assert(output.includes("Page preview unavailable"));
-  assert(!output.includes("Legacy response text"));
-});
-
-test("fetch rejects inconsistent truncation details without exposing model text", () => {
+test("fetch rejects invalid details without exposing model text", () => {
   const base = { title: "Page", content: "body", totalLines: 2, outputLines: 1 };
   const invalid = [
+    { truncated: false },
     { ...base, truncated: true },
     { ...base, truncated: true, truncatedBy: "lines" },
     { ...base, truncated: true, truncatedBy: "bytes", fullOutputPath: "" },
     { ...base, truncated: true, truncatedBy: "invalid", fullOutputPath: "file.md" },
-    { ...base, truncated: false, truncatedBy: "lines", fullOutputPath: "file.md" },
   ];
   for (const details of invalid) {
     const result = { content: [{ type: "text" as const, text: "PRIVATE MODEL TEXT" }], details };

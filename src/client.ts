@@ -92,8 +92,11 @@ function retryDelay(header: string | null, attempt: number) {
 }
 
 /** No network, timers or credential access occurs until a tool is executed. */
-export async function request(operation: "search" | "fetch", input: SearchInput | FetchInput, signal?: AbortSignal, options: ClientOptions = {}): Promise<unknown> {
-  const body = operation === "search" ? validateSearch(input as SearchInput) : validateFetch(input as FetchInput);
+export async function request(...[operation, input, signal, options = {}]:
+  | [operation: "search", input: SearchInput, signal?: AbortSignal, options?: ClientOptions]
+  | [operation: "fetch", input: FetchInput, signal?: AbortSignal, options?: ClientOptions]
+): Promise<unknown> {
+  const body = operation === "search" ? validateSearch(input) : validateFetch(input);
   const env = options.env ?? process.env;
   signal?.throwIfAborted();
   let key = env.DEEPSEEK_API_KEY?.trim();

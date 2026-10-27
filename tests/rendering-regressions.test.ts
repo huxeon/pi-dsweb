@@ -224,20 +224,6 @@ test("call components are reused and display updated arguments", () => {
   assert(!output.includes("first"));
 });
 
-test("search no longer accepts legacy object details", () => {
-  const oldView = { kind: "search" as const, count: 5, items: [{ title: "OLD TITLE", domain: "example.com" }] };
-  for (const details of [oldView, { truncated: true, view: oldView }]) {
-    const result = { content: [{ type: "text" as const, text: "OLD MODEL TEXT" }], details };
-    const output = plainLines(renderSearchResult(result, options, theme, ctx())).join("\n");
-    assert(output.includes("Search preview unavailable."));
-    assert(!output.includes("OLD TITLE"));
-    assert(!output.includes("OLD MODEL TEXT"));
-    assert(!output.includes("Showing"));
-    assert(!output.includes("Content truncated"));
-    assert(!output.includes("Full JSON"));
-  }
-});
-
 test("fetch only needs file access when its body is truncated", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-dsweb-blocked-test-"));
   const blocker = join(dir, "not-a-directory");

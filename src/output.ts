@@ -71,15 +71,21 @@ export async function makeFetchResult(response: FetchData, signal?: AbortSignal)
   signal?.throwIfAborted();
   const { truncation: preview, content: excerpt } = fetchPreview(response.content);
   let content = formatFetch({ title: response.title, content: excerpt });
-  let path: string | undefined;
-  let owned = false;
+  const base = {
+    title: displayLine(response.title),
+    content: excerpt,
+    totalLines: preview.totalLines,
+    outputLines: preview.firstLineExceedsLimit ? 1 : preview.outputLines,
+  };
+  let details: FetchDetails = { ...base, truncated: false };
+  let ownedPath: string | undefined;
   try {
     if (preview.truncated) {
-      path = join(tmpdir(), `pi-dsweb-fetch-${randomBytes(8).toString("hex")}.md`);
+      const path = join(tmpdir(), `pi-dsweb-fetch-${randomBytes(8).toString("hex")}.md`);
       await withFileMutationQueue(path, async () => {
         signal?.throwIfAborted();
-        const file = await open(path!, "wx", 0o600);
-        owned = true;
+        const file = await open(path, "wx", 0o600);
+        ownedPath = path;
         try {
           await file.writeFile(response.content, { encoding: "utf8", signal });
         } finally {
@@ -93,28 +99,17 @@ export async function makeFetchResult(response: FetchData, signal?: AbortSignal)
         const limit = preview.truncatedBy === "bytes" ? ` (${formatSize(FETCH_MAX_BYTES)} limit)` : "";
         content += `\n\n[Showing lines 1-${preview.outputLines} of ${preview.totalLines}${limit}. Full output: ${path}]`;
       }
+      if (!preview.truncatedBy) throw new Error("Missing fetch truncation reason.");
+      details = { ...base, truncated: true, truncatedBy: preview.truncatedBy, fullOutputPath: path };
     }
     signal?.throwIfAborted();
-    const base = {
-      title: displayLine(response.title),
-      content: excerpt,
-      totalLines: preview.totalLines,
-      outputLines: preview.firstLineExceedsLimit ? 1 : preview.outputLines,
-    };
-    let details: FetchDetails;
-    if (preview.truncated) {
-      if (!path || !preview.truncatedBy) throw new Error("Missing fetch truncation details.");
-      details = { ...base, truncated: true, truncatedBy: preview.truncatedBy, fullOutputPath: path };
-    } else {
-      details = { ...base, truncated: false };
-    }
     return {
       content: [{ type: "text" as const, text: content }],
       structuredContent: response,
       details,
     };
   } catch (error) {
-    if (owned && path) await rm(path, { force: true }).catch(() => {});
+    if (ownedPath) await rm(ownedPath, { force: true }).catch(() => {});
     signal?.throwIfAborted();
     throw error;
   }

@@ -64,7 +64,7 @@ function fetchDetailsOf(value: unknown): FetchDetails | undefined {
   const details = value as Partial<FetchDetails>;
   if (typeof details.title !== "string" || typeof details.content !== "string" ||
       typeof details.totalLines !== "number" || typeof details.outputLines !== "number") return undefined;
-  if (details.truncated === false && details.truncatedBy === undefined && details.fullOutputPath === undefined) return details as FetchDetails;
+  if (details.truncated === false) return details as FetchDetails;
   if (details.truncated === true && (details.truncatedBy === "lines" || details.truncatedBy === "bytes") &&
       typeof details.fullOutputPath === "string" && details.fullOutputPath.length > 0) return details as FetchDetails;
   return undefined;

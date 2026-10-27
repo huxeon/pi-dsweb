@@ -77,6 +77,7 @@ test("Fetch bounds a long first line by visual rows and retains the warning on r
   extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
   const fetch = tools.find(tool => tool.name === "web_fetch")!;
   const result = await makeFetchResult({ title: "Page", content: "x".repeat(60_000) });
+  assert(result.details.truncated);
   const component = new ToolExecutionComponent("web_fetch", "visual-preview", { url: "https://example.com" }, {},
     fetch, { requestRender() {} } as unknown as TUI, process.cwd());
   component.updateResult({ ...result, isError: false, durationMs: 1200 });
@@ -100,6 +101,7 @@ test("Fetch shows byte-limit warnings for complete-line excerpts in both UI stat
   extension({ on: () => () => {}, registerTool: (tool: ToolDefinition) => tools.push(tool) } as unknown as ExtensionAPI);
   const fetch = tools.find(tool => tool.name === "web_fetch")!;
   const result = await makeFetchResult({ title: "Page", content: "first\n" + "x".repeat(50 * 1024) });
+  assert(result.details.truncated);
   const component = new ToolExecutionComponent("web_fetch", "byte-preview", { url: "https://example.com" }, {},
     fetch, { requestRender() {} } as unknown as TUI, process.cwd());
   component.updateResult({ ...result, isError: false });

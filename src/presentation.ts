@@ -19,7 +19,7 @@ export type FetchDetails = {
   totalLines: number;
   outputLines: number;
 } & (
-  | { truncated: false; truncatedBy?: never; fullOutputPath?: never }
+  | { truncated: false }
   | { truncated: true; truncatedBy: "lines" | "bytes"; fullOutputPath: string }
 );
 

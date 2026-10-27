@@ -102,6 +102,7 @@ test("oversized first line retains a UTF-8 safe prefix and reports a partial lin
 test("byte limit after complete lines reports the actual line range", async () => {
   const result = await makeFetchResult({ title: "Page", content: "short\n" + "x".repeat(50 * 1024) });
   assert.equal(result.details.content, "short");
+  assert(result.details.truncated);
   assert.equal(result.details.truncatedBy, "bytes");
   assert(result.content[0].text.includes("[Showing lines 1-1 of 2 (50.0KB limit). Full output:"));
 });
@@ -134,6 +135,7 @@ test("truncated fetch saves the exact complete UTF-8 body as private Markdown", 
   assert(!result.details.content.includes("COMPLETE END"));
   assert(result.content[0].text.includes(result.details.content));
   assert(!result.content[0].text.includes("COMPLETE END"));
+  assert(result.details.truncated);
   assert.equal(result.details.fullOutputPath, paths[0]);
   assert(result.content[0].text.includes(`Full output: ${paths[0]}]`));
   assert.equal(result.structuredContent, page);
