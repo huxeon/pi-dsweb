@@ -85,12 +85,6 @@ function errorMessage(body: string, key: string) {
   return "The API returned an error without a JSON error message.";
 }
 
-function retryDelay(header: string | null, attempt: number) {
-  const seconds = header === null ? NaN : Number(header);
-  const delay = Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
-  return Number.isFinite(delay) ? Math.min(30_000, Math.max(0, delay)) : Math.min(8000, 1000 * 2 ** attempt);
-}
-
 /** No network, timers or credential access occurs until a tool is executed. */
 export async function request(...[operation, input, signal, options = {}]:
   | [operation: "search", input: SearchInput, signal?: AbortSignal, options?: ClientOptions]
@@ -145,7 +139,7 @@ export async function request(...[operation, input, signal, options = {}]:
       if (response.status !== 200) {
         const serverError = response.status >= 500 && response.status <= 599;
         if ((response.status === 408 || response.status === 429 || serverError) && attempt < retries) {
-          await wait(retryDelay(response.headers.get("retry-after"), attempt), combined);
+          await wait(Math.min(8000, 1000 * 2 ** attempt), combined);
           continue;
         }
         throw new Error(`DeepSeek ${operation}: HTTP ${response.status}. ${errorMessage(text, key)} ${hints[response.status] ?? (serverError ? "Service error; try again later." : "Unexpected HTTP status.")}`.trim());

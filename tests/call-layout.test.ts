@@ -76,6 +76,23 @@ test("expanded calls stay safe for incomplete arguments and external terminal co
   assert.deepEqual(args, original);
 });
 
+test("call renderers use placeholders for non-string arguments and ignore malformed flags", () => {
+  for (const value of [undefined, null, 0, 42, true, {}, [], Symbol("invalid")]) {
+    for (const expanded of [false, true]) {
+      const search = renderSearchCall({ query: value } as never, theme, context({ expanded }));
+      const fetch = renderFetchCall({ url: value } as never, theme, context({ expanded }));
+      assert.equal(compactText(search), "web_search...");
+      assert.equal(compactText(fetch), "web_fetch...");
+      for (const width of [1, 8, 80]) {
+        assert(search.render(width).every(line => visibleWidth(line) <= width));
+        assert(fetch.render(width).every(line => visibleWidth(line) <= width));
+      }
+    }
+  }
+  const malformed = { query: "query", count: {}, need_content: "false" };
+  assert.equal(compactText(renderSearchCall(malformed as never, theme, context())), "web_searchquery");
+});
+
 test("expanded call components refresh arguments and theme without retaining stale text", () => {
   const first = renderFetchCall({ url }, theme, context({ expanded: true }));
   assert(compactText(first).includes("END_MARKER"));

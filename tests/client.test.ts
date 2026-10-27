@@ -65,7 +65,7 @@ test("missing API key fails before network access", async () => {
   await assert.rejects(request("search", { query: "hi" }, undefined, { env: {}, fetch: fake(() => { throw new Error("must not fetch"); }) }), /Set DEEPSEEK_API_KEY/);
 });
 
-test("retries only transient HTTP statuses, with bounded Retry-After", async () => {
+test("retries transient HTTP statuses with client backoff, ignoring Retry-After", async () => {
   for (const status of [408, 429, 500, 504]) {
     let calls = 0;
     const waits: number[] = [];
@@ -76,15 +76,20 @@ test("retries only transient HTTP statuses, with bounded Retry-After", async () 
     });
     assert.deepEqual(result, { results: [] });
     assert.equal(calls, 3);
-    assert.deepEqual(waits, [30_000, 30_000]);
+    assert.deepEqual(waits, [1000, 2000]);
   }
 });
 
-test("uses exponential backoff when Retry-After is absent", async () => {
+test("uses exponential backoff capped at eight seconds", async () => {
   let calls = 0;
   const waits: number[] = [];
-  await request("search", { query: "hi" }, undefined, { env, fetch: fake(() => ++calls < 3 ? json({}, 429) : json({ results: [] })), sleep: async (ms) => { waits.push(ms); } });
-  assert.deepEqual(waits, [1000, 2000]);
+  await request("search", { query: "hi" }, undefined, {
+    env: { ...env, DSWEB_MAX_RETRIES: "5" },
+    fetch: fake(() => ++calls < 6 ? json({}, 429) : json({ results: [] })),
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  assert.equal(calls, 6);
+  assert.deepEqual(waits, [1000, 2000, 4000, 8000, 8000]);
 });
 
 test("does not retry non-transient errors and provides useful hints", async () => {

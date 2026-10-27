@@ -3,7 +3,7 @@ import {
   type AgentToolResult, type Theme, type ToolDefinition, type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { FETCH_MAX_BYTES, formatFetchLines, safeText, type FetchDetails, type SearchItemView } from "./presentation.ts";
+import { displayLine, FETCH_MAX_BYTES, formatFetchLines, safeText, type FetchDetails, type SearchItemView } from "./presentation.ts";
 import type { FetchInput, SearchInput } from "./schemas.ts";
 import { startToolTimer, toolTimerText } from "./timing.ts";
 
@@ -31,8 +31,6 @@ function callText(context: RenderContext, text: string): Component {
   return component;
 }
 
-function clip(line: string, width: number): string { return truncateToWidth(line, width, "..."); }
-
 function mutedHint(theme: Theme, text: string, hint: string): string {
   // keyHint starts with the key name: keep a space after the leading text.
   return theme.fg("muted", text) + " " + keyHint("app.tools.expand", hint) + theme.fg("muted", ")");
@@ -40,10 +38,10 @@ function mutedHint(theme: Theme, text: string, hint: string): string {
 
 export function renderSearchCall(args: Partial<SearchInput>, theme: Theme, context: RenderContext): Component {
   startToolTimer(context);
-  const query = args.query ? safeText(args.query) : "";
+  const query = typeof args.query === "string" ? safeText(args.query) : "";
   const flags = [
-    args.count !== undefined ? `count ${args.count}` : "",
-    args.need_content ? "content" : "",
+    typeof args.count === "number" ? `count ${args.count}` : "",
+    args.need_content === true ? "content" : "",
   ].filter(Boolean);
   return callText(context,
     theme.fg("toolTitle", theme.bold("web_search")) + " " +
@@ -56,7 +54,7 @@ export function renderSearchCall(args: Partial<SearchInput>, theme: Theme, conte
 export function renderFetchCall(args: Partial<FetchInput>, theme: Theme, context: RenderContext): Component {
   startToolTimer(context);
   return callText(context, theme.fg("toolTitle", theme.bold("web_fetch")) + " " +
-    (args.url ? theme.fg("accent", safeText(args.url)) : theme.fg("muted", "...")));
+    (typeof args.url === "string" && args.url ? theme.fg("accent", safeText(args.url)) : theme.fg("muted", "...")));
 }
 
 function fetchDetailsOf(value: unknown): FetchDetails | undefined {
@@ -75,8 +73,8 @@ function searchOutputLines(items: SearchItemView[]): string[] {
   const lines: string[] = [];
   items.forEach((item, index) => {
     if (index > 0) lines.push("");
-    lines.push(`${index + 1}. ${item.title}`);
-    if (item.url) lines.push(item.url);
+    lines.push(`${index + 1}. ${displayLine(item.title)}`);
+    if (item.url) lines.push(displayLine(item.url));
     if (item.snippet) lines.push(...safeText(item.snippet).replace(/\t/g, "   ").split("\n"));
   });
   return lines;
@@ -96,106 +94,87 @@ function searchItemsOf(value: unknown): SearchItemView[] | undefined {
   return items.every(isSearchItem) ? items : undefined;
 }
 
-function previewStyledLines(styled: readonly string[], expanded: boolean, theme: Theme, width: number): string[] {
-  if (expanded) return [...styled];
-  const rows = new Text(styled.join("\n"), 0, 0).render(width);
-  const hidden = Math.max(0, rows.length - RESULT_PREVIEW_LINES);
-  const lines = rows.slice(0, RESULT_PREVIEW_LINES);
-  if (hidden > 0) lines.push(mutedHint(theme, `... (${hidden} more line${hidden === 1 ? "" : "s"},`, "to expand"));
-  return lines;
-}
-
-function previewLines(all: readonly string[], expanded: boolean, theme: Theme, width: number): string[] {
-  return previewStyledLines(all.map(line => theme.fg("toolOutput", line)), expanded, theme, width);
-}
-
-function formatSearch(details: unknown, expanded: boolean, theme: Theme, width: number): string {
-  const items = searchItemsOf(details);
-  if (!items) return "\n" + theme.fg("muted", "Search preview unavailable.");
-  if (!items.length) return "\n" + theme.fg("muted", "No matching web results");
-  return "\n" + previewLines(searchOutputLines(items), expanded, theme, width).join("\n");
-}
-
-/** Fetch's folded preview is bounded by terminal rows, including wrapped long lines. */
-function formatFetch(details: FetchDetails | undefined, expanded: boolean, theme: Theme, width: number): string {
-  if (!details) return "\n" + theme.fg("muted", "Page preview unavailable.");
-  const body = safeText(details.content).replace(/\t/g, "   ");
-  const bodyLines = body.split("\n");
-  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === "") bodyLines.pop();
-  const lines = ["", ...previewLines(formatFetchLines(details.title, bodyLines), expanded, theme, width)];
-  if (details.truncated) {
-    const path = `Full output: ${safeText(details.fullOutputPath)}. `;
-    const warning = details.truncatedBy === "bytes"
-      ? `Truncated: ${details.outputLines} lines shown (${formatSize(FETCH_MAX_BYTES)} limit)`
-      : `Truncated: showing ${details.outputLines} of ${details.totalLines} lines`;
-    lines.push("", theme.fg("warning", `[${path}${warning}]`));
+/** Prepare text only; terminal wrapping and folding happen once in WebResult. */
+function resultContent(operation: Operation, value: unknown, theme: Theme): { body: string; warning: string } {
+  let lines: string[];
+  let warning = "";
+  if (operation === "search") {
+    const items = searchItemsOf(value);
+    if (!items || !items.length) {
+      return { body: theme.fg("muted", items ? "No matching web results" : "Search preview unavailable."), warning };
+    }
+    lines = searchOutputLines(items);
+  } else {
+    const details = fetchDetailsOf(value);
+    if (!details) return { body: theme.fg("muted", "Page preview unavailable."), warning };
+    const bodyLines = safeText(details.content).replace(/\t/g, "   ").split("\n");
+    while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === "") bodyLines.pop();
+    lines = formatFetchLines(details.title, bodyLines);
+    if (details.truncated) {
+      const limit = details.truncatedBy === "bytes"
+        ? `Truncated: ${details.outputLines} lines shown (${formatSize(FETCH_MAX_BYTES)} limit)`
+        : `Truncated: showing ${details.outputLines} of ${details.totalLines} lines`;
+      warning = theme.fg("warning", `[Full output: ${safeText(details.fullOutputPath)}. ${limit}]`);
+    }
   }
-  return lines.join("\n");
+  return { body: lines.map(line => theme.fg("toolOutput", line)).join("\n"), warning };
 }
 
-function formatResult(operation: Operation, result: AgentToolResult<unknown>, expanded: boolean, theme: Theme, width: number): string {
-  return operation === "search"
-    ? formatSearch(result.details, expanded, theme, width)
-    : formatFetch(fetchDetailsOf(result.details), expanded, theme, width);
-}
-
-/** A compact Pi-style result: output preview, expand hint, warning footer,
- * then the shared timer. Errors use the same bounded visual preview.
+/** Successes and errors share one visual-row preview and footer layout.
+ * Text owns wrapping caches; already wrapped body rows are never laid out again.
  */
 class WebResult implements Component {
-  private readonly text = new Text("", 0, 0);
-  readonly operation: Operation;
+  private readonly body = new Text("", 0, 0);
+  private readonly warning = new Text("", 0, 0);
   private theme!: Theme;
-  private options: ToolRenderResultOptions = { expanded: false, isPartial: false };
+  private expanded = false;
+  private leadingBlank = false;
   private timer = "";
-  private failed = false;
-  private result?: AgentToolResult<unknown>;
-  private pending = true;
-  private lastWidth = 0;
-  private source = "";
 
-  constructor(operation: Operation) { this.operation = operation; }
+  constructor(readonly operation: Operation) {}
 
   update(result: AgentToolResult<unknown>, options: ToolRenderResultOptions, theme: Theme, context: RenderContext) {
     this.theme = theme;
-    this.options = options;
-    this.failed = context.isError;
+    this.expanded = options.expanded;
+    this.leadingBlank = !context.isError;
     this.timer = toolTimerText(context, options.isPartial);
-    if (this.failed) {
+    let body = "", warning = "";
+    if (context.isError) {
       const raw = result.content.filter(part => part.type === "text").map(part => part.text).join("\n");
-      this.source = safeText(raw) || "Request failed.";
-      return;
+      body = (safeText(raw) || "Request failed.").split("\n").map(line => theme.fg("error", line)).join("\n");
+    } else if (!options.isPartial) {
+      ({ body, warning } = resultContent(this.operation, result.details, theme));
     }
-    this.result = result;
-    this.pending = true;
+    this.body.setText(body);
+    this.warning.setText(warning);
   }
 
-  invalidate() { this.text.invalidate(); }
-
-  private renderError(width: number): string[] {
-    const styled = this.source.split("\n").map(line => this.theme.fg("error", line));
-    const text = previewStyledLines(styled, this.options.expanded, this.theme, width).join("\n");
-    const rows = new Text(text, 0, 0).render(width).map(line => clip(line, width));
-    if (this.timer) {
-      if (rows.length > 0) rows.push("");
-      rows.push(clip(this.theme.fg("muted", this.timer), width));
-    }
-    return rows;
+  invalidate() {
+    this.body.invalidate();
+    this.warning.invalidate();
   }
 
   render(width: number): string[] {
     if (width <= 0) return [];
-    if (this.failed) return this.renderError(width);
-    if (this.pending || (!this.options.expanded && this.lastWidth !== width)) {
-      this.lastWidth = width;
-      const body = this.options.isPartial ? "" : formatResult(this.operation, this.result!, this.options.expanded, this.theme, width);
-      const timerLine = this.timer ? this.theme.fg("muted", this.timer) : "";
-      const text = [body, timerLine].filter(Boolean).join("\n\n");
-      // Keep a blank line between the call and a timer-only result.
-      this.text.setText(!body && timerLine ? `\n${text}` : text);
-      this.pending = false;
+    const all = this.body.render(width);
+    // Copy Text's cached rows before adding hints or footers.
+    const rows = this.expanded ? [...all] : all.slice(0, RESULT_PREVIEW_LINES);
+    const hidden = all.length - rows.length;
+    if (hidden > 0) {
+      const hint = mutedHint(this.theme, `... (${hidden} more line${hidden === 1 ? "" : "s"},`, "to expand");
+      rows.push(...new Text(hint, 0, 0).render(width));
     }
-    return this.text.render(width).map(line => clip(line, width));
+    const warning = this.warning.render(width);
+    if (warning.length > 0) {
+      if (rows.length > 0) rows.push("");
+      rows.push(...warning);
+    }
+    if (this.timer) {
+      if (rows.length > 0) rows.push("");
+      rows.push(...new Text(this.theme.fg("muted", this.timer), 0, 0).render(width).map(line => line.trimEnd()));
+    }
+    if (this.leadingBlank && rows.length > 0) rows.unshift("");
+    return rows.map(line => truncateToWidth(line, width, "..."));
   }
 }
 

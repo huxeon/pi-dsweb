@@ -116,6 +116,29 @@ test("full result fields remain display-safe and do not mutate model or codemode
   assert.equal(fetched.details.title, safeText(page.title));
 });
 
+test("persisted Search fields are sanitized at render time without mutating results", () => {
+  const unsafe = "\u001b[31m\u001b[2J\u001b]0;hostile\u0007\u202e";
+  const result = {
+    content: [{ type: "text" as const, text: "MODEL TEXT" }],
+    structuredContent: { raw: unsafe },
+    details: [{ title: unsafe + "Safe title\nnext", url: "https://source.example/" + unsafe + "path", snippet: unsafe + "Safe snippet" }],
+  };
+  const original = structuredClone(result);
+  for (const expanded of [false, true]) {
+    const component = renderSearchResult(result, { expanded, isPartial: false }, theme, context());
+    for (const width of [24, 80]) {
+      const rendered = component.render(width).join("\n");
+      for (const sequence of ["\u001b[31m", "\u001b[2J", "\u001b]0;", "\u202e"]) assert(!rendered.includes(sequence));
+    }
+    const text = rows(component).join("\n");
+    assert(text.includes("1. Safe title next"));
+    assert(text.includes("https://source.example/path"));
+    assert(text.includes("Safe snippet"));
+    assert(!text.includes("MODEL TEXT"));
+  }
+  assert.deepEqual(result, original);
+});
+
 test("very narrow expanded result views never overflow their assigned width", async () => {
   const search = await makeSearchResult({ results: [{ ...item, title: "中😀尾", snippet: "😀中" }] });
   const fetched = await makeFetchResult({ title: "中😀尾", content: "body" });
@@ -149,4 +172,48 @@ test("Pi host expansion exposes complete Search result fields and Fetch titles f
   fetchHost.setExpanded(true);
   assert(compactText(fetchHost).includes(title));
   assert(compactText(fetchHost).includes("Shortpagebody"));
+});
+
+test("success and error previews share five visual rows without accumulating cached footers", async () => {
+  const body = "中😀 words ".repeat(300);
+  const result = await makeFetchResult({ title: "", content: body });
+  const success = renderFetchResult(result, foldedOptions, theme, context());
+  const error = renderFetchResult({ content: [{ type: "text", text: body }], details: undefined },
+    foldedOptions, theme, context({ isError: true }));
+  for (const width of [1, 8, 24, 80, 32, 80]) {
+    const successRows = rows(success, width);
+    const errorRows = rows(error, width);
+    assert.deepEqual(successRows.slice(1, 6), errorRows.slice(0, 5));
+    assert.deepEqual(successRows.slice(6), errorRows.slice(5));
+    assert(successRows.slice(6).join("").replace(/\s/g, "").includes("morelines"));
+    assert.deepEqual(rows(success, width), successRows);
+    assert.deepEqual(rows(error, width), errorRows);
+    assert(success.render(width).every(line => visibleWidth(line) <= width));
+    assert(error.render(width).every(line => visibleWidth(line) <= width));
+  }
+});
+
+test("reused result layout clears warnings and content across success, error and partial updates", async () => {
+  const result = await makeFetchResult({ title: "Long page", content: "body\n".repeat(2100) });
+  const component = renderFetchResult(result, foldedOptions, theme, context());
+  const initial = rows(component);
+  assert(initial.join("\n").includes("Full output:"));
+  component.invalidate();
+  assert.deepEqual(rows(component), initial);
+  assert.deepEqual(rows(component), initial);
+
+  const failed = renderFetchResult({ content: [{ type: "text", text: "Request failed" }], details: undefined },
+    foldedOptions, theme, context({ lastComponent: component, isError: true }));
+  assert.equal(failed, component);
+  assert.deepEqual(rows(failed), ["Request failed", "", "Took 1.2s"]);
+
+  const pending = renderFetchResult({ content: [], details: undefined },
+    { expanded: false, isPartial: true }, theme, context({ lastComponent: component, executionStarted: false }));
+  assert.equal(pending, component);
+  assert.deepEqual(rows(pending), []);
+
+  const next = await makeFetchResult({ title: "", content: "New body" });
+  const completed = renderFetchResult(next, foldedOptions, theme, context({ lastComponent: component }));
+  assert.equal(completed, component);
+  assert.deepEqual(rows(completed), ["", "New body", "", "Took 1.2s"]);
 });

@@ -2,7 +2,7 @@ import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatSize, truncateHead, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import type { FetchData, SearchData } from "./schemas.ts";
 import { buildSearchItems, displayLine, FETCH_MAX_BYTES, FETCH_MAX_LINES, formatFetchLines, type FetchDetails } from "./presentation.ts";
 
@@ -37,10 +37,8 @@ export async function makeSearchResult(response: SearchData, signal?: AbortSigna
       signal?.throwIfAborted();
       contentDirectory ??= await mkdtemp(join(tmpdir(), "pi-dsweb-search-"));
       const path = join(contentDirectory, `result-${index + 1}.md`);
-      await withFileMutationQueue(path, async () => {
-        signal?.throwIfAborted();
-        await writeFile(path, item.content, { encoding: "utf8", mode: 0o600, signal });
-      });
+      signal?.throwIfAborted();
+      await writeFile(path, item.content, { encoding: "utf8", mode: 0o600, signal });
       bodyPaths.set(index, path);
     }
     signal?.throwIfAborted();
@@ -82,16 +80,14 @@ export async function makeFetchResult(response: FetchData, signal?: AbortSignal)
   try {
     if (preview.truncated) {
       const path = join(tmpdir(), `pi-dsweb-fetch-${randomBytes(8).toString("hex")}.md`);
-      await withFileMutationQueue(path, async () => {
-        signal?.throwIfAborted();
-        const file = await open(path, "wx", 0o600);
-        ownedPath = path;
-        try {
-          await file.writeFile(response.content, { encoding: "utf8", signal });
-        } finally {
-          await file.close();
-        }
-      });
+      signal?.throwIfAborted();
+      const file = await open(path, "wx", 0o600);
+      ownedPath = path;
+      try {
+        await file.writeFile(response.content, { encoding: "utf8", signal });
+      } finally {
+        await file.close();
+      }
       if (preview.firstLineExceedsLimit) {
         const firstLine = response.content.split("\n", 1)[0];
         content += `\n\n[Showing first ${formatSize(Buffer.byteLength(excerpt))} of line 1 (line is ${formatSize(Buffer.byteLength(firstLine))}). Full output: ${path}]`;
